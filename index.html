@@ -26,6 +26,19 @@
   #panel input[type=color]{width:100%;height:30px;background:none;border:1px solid #444;border-radius:5px;padding:0}
   #panel .danger{background:#5a2323;color:#fff;border:1px solid #844;border-radius:6px;padding:7px;cursor:pointer;width:100%;font-family:inherit}
   #panel .hint{color:#999;line-height:1.6;font-size:12px}
+  #keysDlg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10;align-items:center;justify-content:center}
+  #keysDlg.open{display:flex}
+  #keysDlg .box{background:#1d2128;border:1px solid #444;border-radius:10px;padding:16px 18px;width:min(560px,94vw);max-height:90vh;overflow:auto;font-size:13px}
+  #keysDlg h3{margin:0 0 10px;color:#ffb35c;font-size:15px}
+  #keysDlg h3 small{display:block;color:#999;font-weight:normal;font-size:12px;margin-top:4px}
+  #keysTbl{width:100%;border-collapse:collapse}
+  #keysTbl td{padding:5px 6px;border-bottom:1px solid #2c323c}
+  #keysTbl td.k{text-align:right;width:150px}
+  #keysTbl kbd{display:inline-block;min-width:60px;text-align:center;background:#2b313b;border:1px solid #555;border-bottom-width:3px;border-radius:5px;padding:3px 8px;cursor:pointer;font-family:inherit;color:#fff}
+  #keysTbl kbd.wait{background:#2f6f9f;border-color:#7fd4ff}
+  #keysTbl kbd.dupe{border-color:#e8212a;color:#ff8a8a}
+  #keysDlg .foot{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+  #keysDlg .foot button{background:#2b313b;color:#eee;border:1px solid #444;border-radius:6px;padding:7px 14px;cursor:pointer;font-family:inherit}
   @media(max-width:700px){#main{flex-direction:column}#stage{min-height:55vh}#panel{width:100%;border-left:0;border-top:1px solid #333;max-height:40vh}}
 </style>
 </head>
@@ -60,6 +73,15 @@
   <button id="jsonSave">JSON 저장</button>
   <label class="btn">JSON 불러오기<input type="file" id="jsonLoad" accept=".json" hidden></label>
   <button id="reset">처음으로</button>
+  <span class="sep"></span>
+  <button id="keysBtn">⌨ 단축키</button>
+</div>
+<div id="keysDlg">
+  <div class="box">
+    <h3>단축키 <small>키 칸을 누른 뒤 원하는 키를 누르면 바뀝니다 (Esc: 취소)</small></h3>
+    <table id="keysTbl"></table>
+    <div class="foot"><button id="keysDefault">기본값으로</button><button id="keysClose">닫기</button></div>
+  </div>
 </div>
 <div id="main">
   <div id="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
@@ -164,6 +186,7 @@ svg.addEventListener("wheel", e=>{ e.preventDefault(); zoomAt(e.deltaY<0?1.1:1/1
 window.addEventListener("resize", ()=>{ updateView(); render(); });
 
 /* ---------- 그리기 ---------- */
+const CASTLE = [[-.7,-1],[-.4,-1],[-.4,-.8],[-.15,-.8],[-.15,-1],[.15,-1],[.15,-.8],[.4,-.8],[.4,-1],[.7,-1],[.7,-.55],[.45,-.35],[.45,.4],[.7,.65],[.7,.8],[.85,.8],[.85,1],[-.85,1],[-.85,.8],[-.7,.8],[-.7,.65],[-.45,.4],[-.45,-.35],[-.7,-.55]];
 function diamond(x,y,r){ return `${x},${y-r} ${x+r},${y} ${x},${y+r} ${x-r},${y}`; }
 function arrowHead(x1,y1,x2,y2,w){
   const a = Math.atan2(y2-y1, x2-x1), L = 10+w*1.5, sp = 0.45;
@@ -197,17 +220,13 @@ function render(forExport=false){
   }
   for(const it of items.filter(i=>i.type==="castle")){
     const s = it.size*0.3, x = it.x, y = it.y;
-    // 성: 탑 3개 + 본체 + 성문 (좌표는 s 기준, 중심 0,0)
-    const P = (ax,ay)=>`${r1(x+ax*s)},${r1(y+(ay-0.05)*s)}`;
-    const body = [[-1.2,.9],[-1.2,-.1],[-.9,-.1],[-.9,-.45],[-.75,-.45],[-.75,-.1],[-.45,-.1],[-.45,-.45],[-.3,-.45],[-.3,-.1],[-.15,-.1],[-.15,-.45],[0,-.45],[0,-.1],[.15,-.1],[.15,-.45],[.3,-.45],[.3,-.1],[.45,-.1],[.45,-.45],[.6,-.45],[.6,-.1],[.9,-.1],[.9,-.45],[1.05,-.45],[1.05,-.1],[1.2,-.1],[1.2,.9]];
-    const tower = cx => [[cx-.3,.9],[cx-.3,-.95],[cx-.2,-.95],[cx-.2,-.75],[cx-.07,-.75],[cx-.07,-.95],[cx+.07,-.95],[cx+.07,-.75],[cx+.2,-.75],[cx+.2,-.95],[cx+.3,-.95],[cx+.3,.9]];
+    // 성: 체스 룩 실루엣 + 성문 아치 (좌표는 s 기준, 중심 0,0)
+    const P = (ax,ay)=>`${r1(x+ax*s)},${r1(y+ay*s)}`;
     const poly = pts => pts.map(p=>P(p[0],p[1])).join(" ");
     h += `<g data-id="${it.id}" style="cursor:move"><polygon points="${diamond(x,y,it.size/2)}" fill="#000" fill-opacity="0.01"/>
       <g fill="${it.fill}" stroke="${it.stroke}" stroke-width="1.3" stroke-linejoin="round" pointer-events="none">
-        <polygon points="${poly(body)}"/>
-        <polygon points="${poly(tower(-.95))}"/><polygon points="${poly(tower(.95))}"/>
-        <polygon points="${poly(tower(0).map(p=>[p[0],p[1]-.25]))}"/>
-        <path d="M${P(-.25,.9)} L${P(-.25,.35)} A${r1(.25*s)},${r1(.25*s)} 0 0 1 ${P(.25,.35)} L${P(.25,.9)} Z" fill="${it.stroke}"/>
+        <polygon points="${poly(CASTLE)}"/>
+        <path d="M${P(-.22,1)} L${P(-.22,.5)} A${r1(.22*s)},${r1(.22*s)} 0 0 1 ${P(.22,.5)} L${P(.22,1)} Z" fill="${it.stroke}"/>
       </g></g>`;
   }
   for(const it of items.filter(i=>i.type==="barricade")){
@@ -218,7 +237,7 @@ function render(forExport=false){
     }
     const legs = `<path d="M${r1(-0.85*s)},${0} L${r1(-1.05*s)},${r1(0.7*s)} M${r1(0.85*s)},${0} L${r1(1.05*s)},${r1(0.7*s)}" stroke="${it.stroke}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
     h += `<g data-id="${it.id}" style="cursor:move"><polygon points="${diamond(x,y,it.size/2)}" fill="#000" fill-opacity="0.01"/>
-      <g transform="translate(${x} ${y}) rotate(${it.rot??45})" pointer-events="none">${legs}${seg}</g></g>`;
+      <g transform="translate(${x} ${y}) rotate(${it.rot??-45})" pointer-events="none">${legs}${seg}</g></g>`;
   }
   for(const it of items.filter(i=>i.type==="arrow")){
     const line =`M${it.x1},${it.y1} L${it.x2},${it.y2}`;
@@ -264,7 +283,9 @@ function showPanel(){
       · 휠 = 확대/축소<br>
       · 칸·글자는 더블클릭하면 글자 입력<br>
       · 화살표는 양 끝 파란 점을 드래그<br>
-      · Delete 삭제, Ctrl+Z 실행취소</div>`;
+      · Delete 삭제, Ctrl+Z 실행취소<br>
+      · 방향키로 선택한 것 이동 — 칸은 격자를 따라 대각선 이웃 칸으로 (Shift: 크게)<br>
+      · 단축키는 위쪽 ⌨ 버튼(또는 ? 키)에서 보고 바꿀 수 있어요</div>`;
     return;
   }
   if(sel.size>1){
@@ -352,16 +373,15 @@ function showPanel(){
     render(); commit();
   });
   if(it.type==="arrow"){
-    document.getElementById("rot45").onclick = ()=>rotateArrow(it,45);
-    document.getElementById("rot90").onclick = ()=>rotateArrow(it,90);
+    document.getElementById("rot45").onclick = ()=>rotateSel(45);
+    document.getElementById("rot90").onclick = ()=>rotateSel(90);
     document.getElementById("straight").onclick = ()=>{
       const p = snapAngle(it.x1,it.y1,it.x2,it.y2); it.x2=p.x; it.y2=p.y; render(); commit();
     };
   }
   if(it.type==="barricade"){
-    const rotB = d=>{ it.rot = ((it.rot??45)+d)%360; render(); commit(); };
-    document.getElementById("rotB45").onclick = ()=>rotB(45);
-    document.getElementById("rotB90").onclick = ()=>rotB(90);
+    document.getElementById("rotB45").onclick = ()=>rotateSel(45);
+    document.getElementById("rotB90").onclick = ()=>rotateSel(90);
   }
   document.getElementById("pDup").onclick = dupSel;
   document.getElementById("delBtn").onclick = delSel;
@@ -381,7 +401,29 @@ function rotateArrow(it,deg){             // 중심 기준 회전
   const cx=(it.x1+it.x2)/2, cy=(it.y1+it.y2)/2, t=deg*Math.PI/180, c=Math.cos(t), s=Math.sin(t);
   const rot=(x,y)=>({x:r1(cx+(x-cx)*c-(y-cy)*s), y:r1(cy+(x-cx)*s+(y-cy)*c)});
   const a=rot(it.x1,it.y1), b=rot(it.x2,it.y2);
-  it.x1=a.x; it.y1=a.y; it.x2=b.x; it.y2=b.y; render(); commit();
+  it.x1=a.x; it.y1=a.y; it.x2=b.x; it.y2=b.y;
+}
+function rotateSel(deg){                  // 선택된 화살표·바리케이트 회전
+  let any=false;
+  for(const it of selItems()){
+    if(it.type==="arrow"){ rotateArrow(it,deg); any=true; }
+    else if(it.type==="barricade"){ it.rot = (((it.rot??-45)+deg)%360+360)%360; any=true; }
+  }
+  if(any){ render(); commit(); }
+}
+function nudgeSel(dx,dy,big){             // 방향키 이동
+  if(!sel.size) return;
+  // 마름모 격자에서 변이 맞닿는 이웃 칸은 대각선 방향이라, 칸은 ↑:오른쪽위 ←:왼쪽위 ↓:왼쪽아래 →:오른쪽아래로 이동
+  const DIAG = {"1,0":[1,1], "-1,0":[-1,-1], "0,-1":[1,-1], "0,1":[-1,1]};
+  const [cx,cy] = DIAG[dx+","+dy];
+  for(const it of selItems()){
+    let sx, sy;
+    if(CELLTYPES.includes(it.type) && snapOn()){ sx = cx*STEP*(big?2:1); sy = cy*STEP*(big?2:1); }
+    else { sx = dx*(big?20:5); sy = dy*(big?20:5); }
+    if(it.type==="arrow"){ it.x1+=sx; it.y1+=sy; it.x2+=sx; it.y2+=sy; }
+    else { it.x+=sx; it.y+=sy; }
+  }
+  render(); commit();
 }
 
 /* ---------- 선택/삭제/복제 ---------- */
@@ -547,7 +589,7 @@ $("addLabel").onclick = ()=>add({type:"label",text:"새 글자",fontSize:15,colo
 $("addArrow").onclick = ()=>add({type:"arrow",x1:-40,y1:0,x2:40,y2:0,head:true,color:RED,width:1.5});
 $("addLine").onclick  = ()=>add({type:"arrow",x1:-40,y1:0,x2:40,y2:0,head:false,color:RED,width:1.5});
 $("undo").onclick = undo; $("redo").onclick = redo; $("dup").onclick = dupSel;
-$("addBarricade").onclick = ()=>add({type:"barricade",size:CELL,fill:"#e8212a",fill2:"#ffffff",stroke:"#cfd4da",rot:45});
+$("addBarricade").onclick = ()=>add({type:"barricade",size:CELL,fill:"#e8212a",fill2:"#ffffff",stroke:"#cfd4da",rot:-45});
 function setMode(m){
   mode = m;
   $("modeSel").classList.toggle("on", m==="select");
@@ -599,17 +641,109 @@ $("png").onclick = ()=>{
   img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
 };
 
-/* ---------- 키보드 ---------- */
+/* ---------- 단축키 ---------- */
+// 각 동작: 이름, 기본 키(조합은 "Ctrl+Shift+키" 형식, 키는 e.key 기준), 실행 함수
+const ACTIONS = [
+  ["addNode","칸 추가","1",()=>$("addNode").click()],
+  ["addCastle","성 추가","2",()=>$("addCastle").click()],
+  ["addWall","벽 추가","3",()=>$("addWall").click()],
+  ["addBarricade","바리케이트 추가","4",()=>$("addBarricade").click()],
+  ["addLabel","글자 추가","5",()=>$("addLabel").click()],
+  ["addArrow","화살표 추가","6",()=>$("addArrow").click()],
+  ["addLine","선 추가","7",()=>$("addLine").click()],
+  ["undo","실행취소","Ctrl+Z",undo],
+  ["redo","다시실행","Ctrl+Y",redo],
+  ["dup","복제","Ctrl+D",dupSel],
+  ["del","삭제","Delete",delSel],
+  ["selAll","전체선택","Ctrl+A",()=>setSel(items.map(i=>i.id))],
+  ["selNone","선택해제","Escape",()=>setSel([])],
+  ["modeSel","선택 모드","V",()=>setMode("select")],
+  ["modePan","화면이동 모드","H",()=>setMode("pan")],
+  ["fit","화면 맞춤","F",fit],
+  ["align","칸 맞추기","G",alignCells],
+  ["rot45","45° 회전 (화살표·바리케이트)","R",()=>rotateSel(45)],
+  ["rot90","90° 회전","Shift+R",()=>rotateSel(90)],
+  ["up","이동 ↑ (칸: 오른쪽 위 칸)","ArrowUp",(e)=>nudgeSel(0,-1,e.shiftKey)],
+  ["left","이동 ← (칸: 왼쪽 위 칸)","ArrowLeft",(e)=>nudgeSel(-1,0,e.shiftKey)],
+  ["down","이동 ↓ (칸: 왼쪽 아래 칸)","ArrowDown",(e)=>nudgeSel(0,1,e.shiftKey)],
+  ["right","이동 → (칸: 오른쪽 아래 칸)","ArrowRight",(e)=>nudgeSel(1,0,e.shiftKey)],
+  ["keys","단축키 창 열기/닫기","?",()=>toggleKeys()],
+];
+const KEYS_STORE = KEY+"keys";
+let keymap = {};
+function defaultKeys(){ const m={}; ACTIONS.forEach(a=>m[a[0]]=a[2]); return m; }
+function loadKeys(){
+  keymap = defaultKeys();
+  try{ const s = localStorage.getItem(KEYS_STORE); if(s) Object.assign(keymap, JSON.parse(s)); }catch(e){}
+}
+function saveKeys(){ try{ localStorage.setItem(KEYS_STORE, JSON.stringify(keymap)); }catch(e){} }
+function comboOf(e){                       // 이벤트 → "Ctrl+Shift+키"
+  const mods = [];
+  if(e.ctrlKey||e.metaKey) mods.push("Ctrl");
+  if(e.altKey) mods.push("Alt");
+  let k = e.key;
+  if(k===" ") k="Space";
+  if(k.length===1) k = k.toUpperCase();
+  // Shift는 글자키·기능키에만 붙임. 방향키는 Shift가 '크게 이동' 역할이고,
+  // '?' 같은 기호는 Shift로 입력되는 키라서 붙이지 않음
+  const isArrow = k.startsWith("Arrow"), isSymbol = k.length===1 && !/[A-Z0-9]/.test(k);
+  if(e.shiftKey && !isArrow && !isSymbol) mods.push("Shift");
+  return [...mods, k].join("+");
+}
+function prettyKey(c){
+  return c.replace("ArrowLeft","←").replace("ArrowRight","→").replace("ArrowUp","↑").replace("ArrowDown","↓").replace("Escape","Esc");
+}
+const MOD_ONLY = new Set(["Control","Shift","Alt","Meta"]);
+let waiting = null;                        // 키 재설정 중인 동작 id
+
 document.addEventListener("keydown", e=>{
   const t = document.activeElement;
-  const typing = /INPUT|TEXTAREA/.test(t.tagName) && t.type!=="checkbox";
-  const k = e.key.toLowerCase();
-  if(e.code==="Space" && !typing && !(t.tagName==="BUTTON")){ spaceDown = true; e.preventDefault(); return; }
-  if((e.ctrlKey||e.metaKey) && k==="z"){ if(typing) return; e.preventDefault(); e.shiftKey?redo():undo(); }
-  else if((e.ctrlKey||e.metaKey) && k==="y"){ if(typing) return; e.preventDefault(); redo(); }
-  else if((e.ctrlKey||e.metaKey) && k==="a"){ if(typing) return; e.preventDefault(); setSel(items.map(i=>i.id)); }
-  else if((e.key==="Delete"||e.key==="Backspace") && !typing){ e.preventDefault(); delSel(); }
+  const typing = /INPUT|TEXTAREA/.test(t.tagName) && t.type!=="checkbox" && t.type!=="color";
+  // 단축키 창에서 키 재설정 중
+  if(waiting){
+    e.preventDefault();
+    if(MOD_ONLY.has(e.key)) return;
+    if(e.key==="Escape"){ waiting=null; renderKeys(); return; }
+    keymap[waiting] = comboOf(e); waiting=null; saveKeys(); renderKeys(); return;
+  }
+  if($("keysDlg").classList.contains("open")){
+    if(e.key==="Escape"){ toggleKeys(false); e.preventDefault(); }
+    return;
+  }
+  if(e.code==="Space" && !typing && t.tagName!=="BUTTON"){ spaceDown = true; e.preventDefault(); return; }
+  if(typing){
+    if(e.key==="Escape"){ t.blur(); }
+    return;
+  }
+  const combo = comboOf(e);
+  const alt = (e.key==="Backspace") ? "Delete" : null;     // Backspace도 삭제로
+  for(const a of ACTIONS){
+    const k = keymap[a[0]];
+    if(k===combo || (alt && k===alt)){ e.preventDefault(); a[3](e); return; }
+  }
 });
+
+function toggleKeys(open){
+  const d = $("keysDlg");
+  const o = open===undefined ? !d.classList.contains("open") : open;
+  d.classList.toggle("open", o); waiting=null;
+  if(o) renderKeys();
+}
+function renderKeys(){
+  const counts = {}; Object.values(keymap).forEach(v=>counts[v]=(counts[v]||0)+1);
+  $("keysTbl").innerHTML = ACTIONS.map(a=>{
+    const k = keymap[a[0]], cls = (waiting===a[0]?"wait":"") + (counts[k]>1?" dupe":"");
+    return `<tr><td>${a[1]}</td><td class="k"><kbd data-a="${a[0]}" class="${cls}" title="${counts[k]>1?"다른 동작과 겹칩니다":""}">${waiting===a[0]?"키 입력…":prettyKey(k)}</kbd></td></tr>`;
+  }).join("");
+  $("keysTbl").querySelectorAll("kbd").forEach(el=>{
+    el.onclick = ()=>{ waiting = el.dataset.a; renderKeys(); };
+  });
+}
+$("keysBtn").onclick = ()=>toggleKeys();
+$("keysClose").onclick = ()=>toggleKeys(false);
+$("keysDefault").onclick = ()=>{ keymap = defaultKeys(); saveKeys(); renderKeys(); };
+$("keysDlg").addEventListener("click", e=>{ if(e.target.id==="keysDlg") toggleKeys(false); });
+loadKeys();
 
 $("bar").addEventListener("click", e=>{ if(e.target.tagName==="BUTTON") e.target.blur(); });
 document.addEventListener("keyup", e=>{ if(e.code==="Space") spaceDown = false; });
