@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>사냥터 지도 편집기</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;background:#14171c;color:#e8e8e8;display:flex;flex-direction:column}
+  #bar{display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;background:#1d2128;border-bottom:1px solid #333;align-items:center}
+  #bar button,#bar label.btn{background:#2b313b;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer;font-family:inherit}
+  #bar button:hover,#bar label.btn:hover{background:#38404d}
+  #bar button.on{background:#2f6f9f;border-color:#7fd4ff}
+  #bar .sep{width:1px;height:22px;background:#444;margin:0 4px}
+  #bar .chk{font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer}
+  #main{flex:1;display:flex;min-height:0}
+  #stage{flex:1;min-width:0;position:relative;overflow:hidden}
+  svg{position:absolute;inset:0;width:100%;height:100%;background:#242a33;touch-action:none;user-select:none;-webkit-user-select:none}
+  #panel{width:250px;background:#1d2128;border-left:1px solid #333;padding:12px;overflow:auto;font-size:13px}
+  #panel h3{margin:0 0 10px;font-size:14px;color:#ffb35c}
+  #panel .row{margin-bottom:10px;display:flex;flex-direction:column;gap:4px}
+  #panel .btns{display:flex;gap:6px;margin-bottom:10px}
+  #panel .btns button{flex:1;background:#2b313b;color:#eee;border:1px solid #444;border-radius:6px;padding:7px 4px;cursor:pointer;font-family:inherit;font-size:12px}
+  #panel input[type=text],#panel input[type=number]{background:#14171c;color:#fff;border:1px solid #444;border-radius:5px;padding:6px;font-family:inherit;font-size:13px;width:100%}
+  #panel input[type=color]{width:100%;height:30px;background:none;border:1px solid #444;border-radius:5px;padding:0}
+  #panel .danger{background:#5a2323;color:#fff;border:1px solid #844;border-radius:6px;padding:7px;cursor:pointer;width:100%;font-family:inherit}
+  #panel .hint{color:#999;line-height:1.6;font-size:12px}
+  @media(max-width:700px){#main{flex-direction:column}#stage{min-height:55vh}#panel{width:100%;border-left:0;border-top:1px solid #333;max-height:40vh}}
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="addNode">＋ 칸</button>
+  <button id="addRook">＋ 룩</button>
+  <button id="addWall">＋ 벽</button>
+  <button id="addBarricade">＋ 바리케이트</button>
+  <button id="addLabel">＋ 글자</button>
+  <button id="addArrow">＋ 화살표</button>
+  <button id="addLine">＋ 선</button>
+  <span class="sep"></span>
+  <button id="undo">↶ 실행취소</button>
+  <button id="redo">↷ 다시실행</button>
+  <button id="dup">복제</button>
+  <span class="sep"></span>
+  <button id="modeSel" class="on" title="빈 곳을 드래그해서 범위로 여러 개 선택 (Shift: 기존 선택에 추가)">⬚ 선택</button>
+  <button id="modePan" title="빈 곳을 드래그해서 화면 이동 (마우스 오른쪽/가운데 버튼, Space+드래그로도 가능)">✋ 화면이동</button>
+  <button id="selAll">전체선택</button>
+  <button id="selNone">선택해제</button>
+  <button id="zin">＋</button>
+  <button id="zout">－</button>
+  <button id="fit">화면 맞춤</button>
+  <span class="sep"></span>
+  <label class="chk"><input type="checkbox" id="snap" checked> 칸 스냅</label>
+  <label class="chk"><input type="checkbox" id="angSnap" checked> 화살표 45° 고정</label>
+  <span class="sep"></span>
+  <button id="png">PNG 저장</button>
+  <button id="jsonSave">JSON 저장</button>
+  <label class="btn">JSON 불러오기<input type="file" id="jsonLoad" accept=".json" hidden></label>
+  <button id="reset">처음으로</button>
+</div>
+<div id="main">
+  <div id="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  <div id="panel"></div>
+</div>
+
+<script>
+const svg = document.getElementById("svg");
+const panel = document.getElementById("panel");
+const ORANGE = "#e0892b", RED = "#e8212a";
+const CELL = 90, STEP = 45, GX = 60, GY = 50;      // 칸 크기, 스냅 간격, 격자 원점
+const CELLTYPES = ["node","rook","wall","barricade"];
+
+/* ---------- 기본 데이터 (원본 이미지 좌표를 70%로 축소) ---------- */
+function defaultData(){
+  const tx = x => Math.round(GX + (x-15)*STEP/65);
+  const ty = y => Math.round(GY + (y-23)*STEP/65);
+  const N = (id,x,y,text,sub="")=>({id,type:"node",x:tx(x),y:ty(y),text,sub,size:CELL,fontSize:13,stroke:ORANGE,color:"#ffffff",fill:""});
+  const L = (id,x,y,text)=>({id,type:"label",x:tx(x),y:ty(y),text,fontSize:15,color:RED});
+  const A = (id,x1,y1,x2,y2,head=true)=>({id,type:"arrow",x1:tx(x1),y1:ty(y1),x2:tx(x2),y2:ty(y2),head,color:RED,width:1.5});
+  return [
+    N(1,340,88,"3.낭만스","(풀스킬)"), N(2,470,88,"7.상세르"), N(3,535,153,"10.로직"),
+    N(4,210,218,"2.몽쎄리"), N(5,340,218,"6.승리기운"), N(6,470,218,"9.도적"),
+    N(7,145,283,"1.피치아라"), N(8,275,283,"5.정글은포근"),
+    N(9,145,413,"4.이상민","(풀스킬)"), N(10,275,413,"8.까틀"),
+    N(11,340,478,"11.에당"), N(12,405,543,"12.던크"), N(13,535,543,"13.시원이당"),
+    L(14,405,160,"작은몹"), L(15,210,355,"큰몹"),
+    A(16,470,252,424,284), A(17,305,405,350,358),
+    A(18,430,718,240,530), A(19,712,545,425,718,false), A(20,240,527,298,525,false)
+  ];
+}
+
+/* ---------- 상태 ---------- */
+let items = [], sel = new Set(), nextId = 100;
+let hist = [], hi = -1;
+const view = {x:0, y:0, z:1};
+let mode = "select";         // select | pan
+let drag = null;
+let spaceDown = false;
+const KEY = "huntMapEditor2";
+
+function load(){
+  try{ const s = localStorage.getItem(KEY); if(s) items = JSON.parse(s); }catch(e){}
+  if(!Array.isArray(items) || !items.length) items = defaultData();
+  nextId = Math.max(100, ...items.map(i=>i.id+1));
+}
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(items)); }catch(e){} }
+function commit(){
+  const s = JSON.stringify(items);
+  if(hist[hi] === s) return;
+  hist = hist.slice(0, hi+1); hist.push(s); hi = hist.length-1;
+  if(hist.length > 200){ hist.shift(); hi--; }
+  save();
+}
+function restore(s){
+  items = JSON.parse(s);
+  sel = new Set([...sel].filter(id=>items.some(i=>i.id===id)));
+  render(); showPanel(); save();
+}
+function undo(){ if(hi>0){ hi--; restore(hist[hi]); } }
+function redo(){ if(hi<hist.length-1){ hi++; restore(hist[hi]); } }
+const byId = id => items.find(i=>i.id===id);
+const selItems = () => items.filter(i=>sel.has(i.id));
+const esc = s => String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const r1 = n => Math.round(n*10)/10;
+
+/* ---------- 화면(뷰) ---------- */
+function updateView(){
+  const w = svg.clientWidth || 800, h = svg.clientHeight || 600;
+  svg.setAttribute("viewBox", `${view.x} ${view.y} ${w/view.z} ${h/view.z}`);
+}
+function bbox(list){
+  if(!list.length) return {x:0,y:0,w:400,h:300};
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  const add=(x,y)=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);};
+  for(const it of list){
+    if(it.type==="arrow"){ add(it.x1,it.y1); add(it.x2,it.y2); }
+    else if(it.type==="label"){ const w=it.text.length*it.fontSize*0.6; add(it.x-w,it.y-it.fontSize); add(it.x+w,it.y+it.fontSize); }
+    else { const r=it.size/2; add(it.x-r,it.y-r); add(it.x+r,it.y+r); }
+  }
+  return {x:x0,y:y0,w:x1-x0,h:y1-y0};
+}
+function fit(){
+  const b = bbox(items), w = svg.clientWidth||800, h = svg.clientHeight||600;
+  view.z = Math.min(2, Math.max(0.2, Math.min(w/(b.w+80), h/(b.h+80))));
+  view.x = b.x + b.w/2 - w/view.z/2;
+  view.y = b.y + b.h/2 - h/view.z/2;
+  updateView(); render();
+}
+function zoomAt(f, cx, cy){           // cx,cy: 화면(px) 기준 위치
+  const rect = svg.getBoundingClientRect();
+  const px = cx - rect.left, py = cy - rect.top;
+  const wx = view.x + px/view.z, wy = view.y + py/view.z;
+  view.z = Math.min(4, Math.max(0.2, view.z*f));
+  view.x = wx - px/view.z; view.y = wy - py/view.z;
+  updateView(); render();
+}
+svg.addEventListener("wheel", e=>{ e.preventDefault(); zoomAt(e.deltaY<0?1.1:1/1.1, e.clientX, e.clientY); }, {passive:false});
+window.addEventListener("resize", ()=>{ updateView(); render(); });
+
+/* ---------- 그리기 ---------- */
+const ROOK = [[-.7,-1],[-.4,-1],[-.4,-.8],[-.15,-.8],[-.15,-1],[.15,-1],[.15,-.8],[.4,-.8],[.4,-1],[.7,-1],[.7,-.55],[.45,-.35],[.45,.4],[.7,.65],[.7,.8],[.85,.8],[.85,1],[-.85,1],[-.85,.8],[-.7,.8],[-.7,.65],[-.45,.4],[-.45,-.35],[-.7,-.55]];
+function diamond(x,y,r){ return `${x},${y-r} ${x+r},${y} ${x},${y+r} ${x-r},${y}`; }
+function arrowHead(x1,y1,x2,y2,w){
+  const a = Math.atan2(y2-y1, x2-x1), L = 10+w*1.5, sp = 0.45;
+  return `M${x2-L*Math.cos(a-sp)},${y2-L*Math.sin(a-sp)} L${x2},${y2} L${x2-L*Math.cos(a+sp)},${y2-L*Math.sin(a+sp)}`;
+}
+function render(forExport=false){
+  const z = view.z;
+  let h = `<rect x="-20000" y="-20000" width="40000" height="40000" fill="#242a33"/>`;
+  for(const it of items.filter(i=>i.type==="node")){
+    const r = it.size/2, x=it.x, y=it.y, hasSub = it.sub && it.sub.trim();
+    const ty = hasSub ? y-1 : y+it.fontSize*0.35;
+    h += `<g data-id="${it.id}" style="cursor:move">
+      <polygon points="${diamond(x,y,r)}" fill="${it.fill||"#000"}" fill-opacity="${it.fill?1:0.01}" stroke="${it.stroke}" stroke-width="1"/>
+      <text x="${x}" y="${ty}" text-anchor="middle" font-size="${it.fontSize}" font-weight="bold" fill="${it.color}" pointer-events="none">${esc(it.text)}</text>
+      ${hasSub?`<text x="${x}" y="${y+it.fontSize*0.85}" text-anchor="middle" font-size="${Math.max(8,it.fontSize*0.62)}" font-weight="bold" fill="${it.color}" pointer-events="none">${esc(it.sub)}</text>`:""}</g>`;
+  }
+  for(const it of items.filter(i=>i.type==="wall")){
+    h += `<g data-id="${it.id}" style="cursor:move"><polygon points="${diamond(it.x,it.y,it.size/2)}" fill="${it.fill}" stroke="${it.stroke}" stroke-width="1.5"/></g>`;
+  }
+  for(const it of items.filter(i=>i.type==="rook")){
+    const s = it.size*0.28;
+    const pts = ROOK.map(p=>`${r1(it.x+p[0]*s)},${r1(it.y+p[1]*s)}`).join(" ");
+    h += `<g data-id="${it.id}" style="cursor:move"><polygon points="${diamond(it.x,it.y,it.size/2)}" fill="#000" fill-opacity="0.01"/>
+      <polygon points="${pts}" fill="${it.fill}" stroke="${it.stroke}" stroke-width="1.5" stroke-linejoin="round" pointer-events="none"/></g>`;
+  }
+  for(const it of items.filter(i=>i.type==="barricade")){
+    const s = it.size*0.3, x = it.x, y = it.y;
+    let seg = "";
+    for(let k=0;k<5;k++){
+      seg += `<rect x="${r1(-1.25*s+k*0.5*s)}" y="${r1(-0.55*s)}" width="${r1(0.5*s)}" height="${r1(0.6*s)}" fill="${k%2?it.fill2:it.fill}" stroke="${it.stroke}" stroke-width="1"/>`;
+    }
+    const legs = `<path d="M${r1(-0.9*s)},${r1(0.05*s)} L${r1(-1.1*s)},${r1(0.85*s)} M${r1(0.9*s)},${r1(0.05*s)} L${r1(1.1*s)},${r1(0.85*s)}" stroke="${it.stroke}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
+    h += `<g data-id="${it.id}" style="cursor:move"><polygon points="${diamond(x,y,it.size/2)}" fill="#000" fill-opacity="0.01"/>
+      <g transform="translate(${x} ${y}) rotate(${it.rot||0}) translate(0 ${r1(-0.15*s)})" pointer-events="none">${legs}${seg}</g></g>`;
+  }
+  for(const it of items.filter(i=>i.type==="arrow")){
+    const line =`M${it.x1},${it.y1} L${it.x2},${it.y2}`;
+    h += `<g data-id="${it.id}" style="cursor:move">
+      <path d="${line}" stroke="transparent" stroke-width="${10/z}" fill="none"/>
+      <path d="${line}${it.head?" "+arrowHead(it.x1,it.y1,it.x2,it.y2,it.width):""}" stroke="${it.color}" stroke-width="${it.width}" fill="none" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/></g>`;
+  }
+  for(const it of items.filter(i=>i.type==="label")){
+    h += `<g data-id="${it.id}" style="cursor:move"><text x="${it.x}" y="${it.y+it.fontSize*0.35}" text-anchor="middle" font-size="${it.fontSize}" font-weight="bold" fill="${it.color}">${esc(it.text)}</text></g>`;
+  }
+  if(!forExport){
+    for(const it of selItems()){
+      if(it.type==="arrow"){
+        if(sel.size===1){
+          h += `<circle data-h="1" cx="${it.x1}" cy="${it.y1}" r="${7/z}" fill="#7fd4ff" stroke="#fff" stroke-width="${1/z}" style="cursor:crosshair"/>
+                <circle data-h="2" cx="${it.x2}" cy="${it.y2}" r="${7/z}" fill="#7fd4ff" stroke="#fff" stroke-width="${1/z}" style="cursor:crosshair"/>`;
+        } else {
+          h += `<path d="M${it.x1},${it.y1} L${it.x2},${it.y2}" stroke="#7fd4ff" stroke-width="${4/z}" stroke-opacity=".5" fill="none" pointer-events="none"/>`;
+        }
+      } else if(it.type==="label"){
+        const w = it.text.length*it.fontSize*0.62/2+6;
+        h += `<rect x="${it.x-w}" y="${it.y-it.fontSize*0.8}" width="${w*2}" height="${it.fontSize*1.6}" fill="none" stroke="#7fd4ff" stroke-width="${1.5/z}" stroke-dasharray="${5/z} ${4/z}" pointer-events="none"/>`;
+      } else {
+        h += `<polygon points="${diamond(it.x,it.y,it.size/2+3)}" fill="none" stroke="#7fd4ff" stroke-width="${1.5/z}" stroke-dasharray="${5/z} ${4/z}" pointer-events="none"/>`;
+      }
+    }
+    if(drag && drag.mode==="marquee"){
+      const m = drag;
+      h += `<rect x="${Math.min(m.sx,m.cx)}" y="${Math.min(m.sy,m.cy)}" width="${Math.abs(m.cx-m.sx)}" height="${Math.abs(m.cy-m.sy)}" fill="#7fd4ff" fill-opacity=".12" stroke="#7fd4ff" stroke-width="${1/z}" stroke-dasharray="${4/z}" pointer-events="none"/>`;
+    }
+  }
+  svg.innerHTML = h;
+}
+
+/* ---------- 패널 ---------- */
+function showPanel(){
+  if(sel.size===0){
+    panel.innerHTML = `<h3>편집 패널</h3><div class="hint">
+      · 칸·룩·벽·바리케이트·글자·화살표를 클릭해서 선택<br>
+      · 여러 개 선택: 빈 곳 드래그(⬚ 선택 모드), Shift+클릭, Ctrl+A<br>
+      · 여러 개를 선택하면 함께 이동하고 색도 한꺼번에 바꿀 수 있어요<br>
+      · 화면 이동: ✋ 모드로 바꾸거나, 오른쪽/가운데 버튼 드래그, Space+드래그<br>
+      · 휠 = 확대/축소<br>
+      · 칸·글자는 더블클릭하면 글자 입력<br>
+      · 화살표는 양 끝 파란 점을 드래그<br>
+      · Delete 삭제, Ctrl+Z 실행취소</div>`;
+    return;
+  }
+  if(sel.size>1){
+    const its = selItems();
+    const cnt = {}; its.forEach(i=>cnt[i.type]=(cnt[i.type]||0)+1);
+    const names = {node:"칸",rook:"룩",wall:"벽",barricade:"바리케이트",label:"글자",arrow:"화살표/선"};
+    const summary = Object.keys(cnt).map(k=>`${names[k]} ${cnt[k]}`).join(" · ");
+    const first = (pred,prop,def)=>{ const f = its.find(pred); return (f && f[prop]) || def; };
+    const isCell = i=>CELLTYPES.includes(i.type);
+    panel.innerHTML = `<h3>${sel.size}개 선택됨</h3>
+      <div class="hint" style="margin-bottom:10px">${summary}<br>드래그하면 함께 움직입니다.</div>
+      <div class="row"><label>배경/채우기 색 (칸·룩·벽·바리케이트)</label>
+        <input type="color" data-m="fill" value="${first(isCell,"fill","#333b47")}"></div>
+      <div class="btns"><button id="mNoFill">칸 배경 없음</button></div>
+      <div class="row"><label>테두리/선 색 (칸·룩·벽·바리케이트·화살표)</label>
+        <input type="color" data-m="stroke" value="${first(i=>isCell(i)&&i.stroke,"stroke",first(i=>i.type==="arrow","color","#e0892b"))}"></div>
+      <div class="row"><label>글자 색 (칸·글자)</label>
+        <input type="color" data-m="text" value="${first(i=>i.type==="node"||i.type==="label","color","#ffffff")}"></div>
+      <div class="btns"><button id="pDup">복제</button></div>
+      <button class="danger" id="delBtn">모두 삭제</button>`;
+    const applyColor = (kind,val)=>{
+      for(const it of selItems()){
+        if(kind==="fill" && isCell(it)) it.fill = val;
+        else if(kind==="stroke"){ if(isCell(it)) it.stroke = val; else if(it.type==="arrow") it.color = val; }
+        else if(kind==="text" && (it.type==="node"||it.type==="label")) it.color = val;
+      }
+      render();
+    };
+    panel.querySelectorAll("[data-m]").forEach(inp=>{
+      inp.addEventListener("input", ()=>applyColor(inp.dataset.m, inp.value));
+      inp.addEventListener("change", ()=>commit());
+    });
+    document.getElementById("mNoFill").onclick = ()=>{
+      selItems().forEach(it=>{ if(it.type==="node") it.fill=""; });
+      render(); commit();
+    };
+    document.getElementById("pDup").onclick = dupSel;
+    document.getElementById("delBtn").onclick = delSel;
+    return;
+  }
+  const it = selItems()[0];
+  const f = (label,prop,type="text",extra="") =>
+    `<div class="row"><label>${label}</label><input type="${type}" data-p="${prop}" value="${esc(it[prop]??"")}" ${extra}></div>`;
+  let h = "";
+  if(it.type==="node"){
+    h = `<h3>칸 수정</h3>` + f("번호.이름","text") + f("보조 문구 (예: (풀스킬))","sub")
+      + f("칸 크기","size","number",'min="30" max="300" step="5"')
+      + f("글자 크기","fontSize","number",'min="6" max="60"')
+      + `<div class="row"><label>배경색</label><input type="color" data-p="fill" value="${it.fill||"#333b47"}">
+         <label><input type="checkbox" id="noFill" ${it.fill?"":"checked"}> 배경 없음</label></div>`
+      + f("테두리 색","stroke","color") + f("글자 색","color","color");
+  } else if(it.type==="rook"){
+    h = `<h3>룩 수정</h3>` + f("칸 크기","size","number",'min="30" max="300" step="5"') + f("말 색","fill","color") + f("테두리 색","stroke","color");
+  } else if(it.type==="wall"){
+    h = `<h3>벽 수정</h3>` + f("칸 크기","size","number",'min="30" max="300" step="5"') + f("벽 색","fill","color") + f("테두리 색","stroke","color");
+  } else if(it.type==="barricade"){
+    h = `<h3>바리케이트 수정</h3>` + f("칸 크기","size","number",'min="30" max="300" step="5"')
+      + f("줄무늬 색 1","fill","color") + f("줄무늬 색 2","fill2","color") + f("테두리 색","stroke","color")
+      + `<div class="btns"><button id="rotB45">↻ 45° 회전</button><button id="rotB90">↻ 90° 회전</button></div>`;
+  } else if(it.type==="label"){
+    h = `<h3>글자 수정</h3>` + f("내용","text") + f("글자 크기","fontSize","number",'min="6" max="80"') + f("색","color","color");
+  } else {
+    h = `<h3>${it.head?"화살표":"선"} 수정</h3>`
+      + f("색","color","color") + f("굵기","width","number",'min="0.5" max="12" step="0.5"')
+      + `<div class="row"><label><input type="checkbox" data-p="head" ${it.head?"checked":""}> 화살촉 표시</label></div>
+         <div class="btns"><button id="rot45">↻ 45° 회전</button><button id="rot90">↻ 90° 회전</button></div>
+         <div class="btns"><button id="straight">반듯하게 맞춤</button></div>`;
+  }
+  h += `<div class="btns"><button id="pDup">복제</button></div><button class="danger" id="delBtn">삭제</button>`;
+  panel.innerHTML = h;
+  panel.querySelectorAll("[data-p]").forEach(inp=>{
+    const p = inp.dataset.p;
+    inp.addEventListener("input", ()=>{
+      if(inp.type==="checkbox") it[p] = inp.checked;
+      else if(inp.type==="number") it[p] = parseFloat(inp.value)||0;
+      else it[p] = inp.value;
+      if(p==="fill"){ const nf=document.getElementById("noFill"); if(nf) nf.checked=false; }
+      render();
+    });
+    inp.addEventListener("change", ()=>{ commit(); if(p==="head") showPanel(); });
+  });
+  const nf = document.getElementById("noFill");
+  if(nf) nf.addEventListener("change", ()=>{
+    it.fill = nf.checked ? "" : panel.querySelector('[data-p="fill"]').value;
+    render(); commit();
+  });
+  if(it.type==="arrow"){
+    document.getElementById("rot45").onclick = ()=>rotateArrow(it,45);
+    document.getElementById("rot90").onclick = ()=>rotateArrow(it,90);
+    document.getElementById("straight").onclick = ()=>{
+      const p = snapAngle(it.x1,it.y1,it.x2,it.y2); it.x2=p.x; it.y2=p.y; render(); commit();
+    };
+  }
+  if(it.type==="barricade"){
+    const rotB = d=>{ it.rot = ((it.rot||0)+d)%360; render(); commit(); };
+    document.getElementById("rotB45").onclick = ()=>rotB(45);
+    document.getElementById("rotB90").onclick = ()=>rotB(90);
+  }
+  document.getElementById("pDup").onclick = dupSel;
+  document.getElementById("delBtn").onclick = delSel;
+}
+function focusText(){
+  const inp = panel.querySelector('[data-p="text"]');
+  if(inp){ inp.focus(); inp.select(); }
+}
+
+/* ---------- 화살표 각도 ---------- */
+function snapAngle(ox,oy,x,y){            // (ox,oy)를 기준으로 (x,y)를 45° 단위에 맞춤
+  const dx=x-ox, dy=y-oy, len=Math.hypot(dx,dy);
+  const a = Math.round(Math.atan2(dy,dx)/(Math.PI/4))*(Math.PI/4);
+  return {x:r1(ox+len*Math.cos(a)), y:r1(oy+len*Math.sin(a))};
+}
+function rotateArrow(it,deg){             // 중심 기준 회전
+  const cx=(it.x1+it.x2)/2, cy=(it.y1+it.y2)/2, t=deg*Math.PI/180, c=Math.cos(t), s=Math.sin(t);
+  const rot=(x,y)=>({x:r1(cx+(x-cx)*c-(y-cy)*s), y:r1(cy+(x-cx)*s+(y-cy)*c)});
+  const a=rot(it.x1,it.y1), b=rot(it.x2,it.y2);
+  it.x1=a.x; it.y1=a.y; it.x2=b.x; it.y2=b.y; render(); commit();
+}
+
+/* ---------- 선택/삭제/복제 ---------- */
+function setSel(ids){ sel = new Set(ids); render(); showPanel(); }
+function delSel(){
+  if(!sel.size) return;
+  items = items.filter(i=>!sel.has(i.id)); sel = new Set();
+  render(); showPanel(); commit();
+}
+function dupSel(){
+  const ids=[];
+  for(const it of selItems()){
+    const c = JSON.parse(JSON.stringify(it)); c.id = nextId++;
+    if(c.type==="arrow"){ c.x1+=20;c.y1+=20;c.x2+=20;c.y2+=20; } else { c.x+=20; c.y+=20; }
+    items.push(c); ids.push(c.id);
+  }
+  setSel(ids); commit();
+}
+
+/* ---------- 마우스 ---------- */
+function pt(e){
+  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+  return {x:p.x, y:p.y};
+}
+const snapOn = () => document.getElementById("snap").checked;
+function snapCell(x,y){
+  return {x: GX + Math.round((x-GX)/STEP)*STEP, y: GY + Math.round((y-GY)/STEP)*STEP};
+}
+svg.addEventListener("pointerdown", e=>{
+  if(e.button===1 || e.button===2 || spaceDown){          // 가운데/오른쪽 버튼, Space: 항상 화면 이동
+    e.preventDefault();
+    drag = {mode:"pan", px:e.clientX, py:e.clientY, vx:view.x, vy:view.y, moved:false, keep:true};
+    svg.setPointerCapture(e.pointerId); return;
+  }
+  const p = pt(e);
+  const h = e.target.closest("[data-h]");
+  if(h){
+    drag = {mode:"handle", which:h.dataset.h, id:[...sel][0]};
+    svg.setPointerCapture(e.pointerId); return;
+  }
+  const g = e.target.closest("[data-id]");
+  if(g){
+    const id = +g.dataset.id;
+    if(e.shiftKey){
+      if(sel.has(id)){ sel.delete(id); render(); showPanel(); return; }
+      sel.add(id);
+    } else if(!sel.has(id)){
+      sel = new Set([id]);
+    }
+    const origs = {}; selItems().forEach(i=>origs[i.id]=JSON.parse(JSON.stringify(i)));
+    drag = {mode:"move", primary:id, start:p, origs, moved:false};
+    render(); showPanel();
+    svg.setPointerCapture(e.pointerId); return;
+  }
+  // 빈 곳
+  const marquee = (mode==="select") || e.shiftKey;      // 선택 모드, 또는 Shift+드래그
+  if(marquee){
+    if(!e.shiftKey) sel = new Set();
+    drag = {mode:"marquee", sx:p.x, sy:p.y, cx:p.x, cy:p.y, base:new Set(sel)};
+  } else {
+    drag = {mode:"pan", px:e.clientX, py:e.clientY, vx:view.x, vy:view.y, moved:false};
+  }
+  svg.setPointerCapture(e.pointerId);
+  render(); showPanel();
+});
+svg.addEventListener("pointermove", e=>{
+  if(!drag) return;
+  if(drag.mode==="pan"){
+    const dx=e.clientX-drag.px, dy=e.clientY-drag.py;
+    if(Math.abs(dx)+Math.abs(dy)>3) drag.moved = true;
+    view.x = drag.vx - dx/view.z; view.y = drag.vy - dy/view.z;
+    updateView(); return;
+  }
+  const p = pt(e);
+  if(drag.mode==="marquee"){
+    drag.cx=p.x; drag.cy=p.y;
+    const x0=Math.min(drag.sx,p.x), x1=Math.max(drag.sx,p.x), y0=Math.min(drag.sy,p.y), y1=Math.max(drag.sy,p.y);
+    const ids = new Set(drag.base);
+    for(const it of items){
+      const cx = it.type==="arrow" ? (it.x1+it.x2)/2 : it.x, cy = it.type==="arrow" ? (it.y1+it.y2)/2 : it.y;
+      if(cx>=x0&&cx<=x1&&cy>=y0&&cy<=y1) ids.add(it.id);
+    }
+    sel = ids; render(); return;
+  }
+  if(drag.mode==="handle"){
+    const it = byId(drag.id); if(!it) return;
+    const w = drag.which, ox = w==="1"?it.x2:it.x1, oy = w==="1"?it.y2:it.y1;
+    let q = {x:Math.round(p.x), y:Math.round(p.y)};
+    if(document.getElementById("angSnap").checked){
+      q = snapAngle(ox,oy,p.x,p.y); q = {x:Math.round(q.x), y:Math.round(q.y)};
+    }
+    it["x"+w]=q.x; it["y"+w]=q.y; render(); return;
+  }
+  if(drag.mode==="move"){
+    let dx = p.x-drag.start.x, dy = p.y-drag.start.y;
+    if(Math.abs(dx)+Math.abs(dy)>2) drag.moved = true;
+    const pr = drag.origs[drag.primary];
+    if(snapOn() && CELLTYPES.includes(pr.type)){
+      const s = snapCell(pr.x+dx, pr.y+dy); dx = s.x-pr.x; dy = s.y-pr.y;
+    } else { dx=Math.round(dx); dy=Math.round(dy); }
+    for(const it of selItems()){
+      const o = drag.origs[it.id]; if(!o) continue;
+      if(it.type==="arrow"){ it.x1=o.x1+dx; it.y1=o.y1+dy; it.x2=o.x2+dx; it.y2=o.y2+dy; }
+      else { it.x=o.x+dx; it.y=o.y+dy; }
+    }
+    render();
+  }
+});
+function endDrag(){
+  if(!drag) return;
+  const d = drag; drag = null;
+  if(d.mode==="pan" && !d.moved && !d.keep){ sel = new Set(); showPanel(); }
+  if(d.mode==="marquee") showPanel();
+  if(d.mode==="move"||d.mode==="handle") commit();
+  render();
+}
+svg.addEventListener("contextmenu", e=>e.preventDefault());
+svg.addEventListener("pointerup", endDrag);
+svg.addEventListener("pointercancel", endDrag);
+svg.addEventListener("dblclick", e=>{
+  const g = e.target.closest("[data-id]"); if(!g) return;
+  const it = byId(+g.dataset.id);
+  if(it && (it.type==="node"||it.type==="label")){ setSel([it.id]); focusText(); }
+});
+
+/* ---------- 추가 버튼 ---------- */
+function viewCenter(){
+  const w = svg.clientWidth||800, h = svg.clientHeight||600;
+  return {x:view.x+w/view.z/2, y:view.y+h/view.z/2};
+}
+function add(it){
+  const c = viewCenter();
+  if(CELLTYPES.includes(it.type)){ const s = snapCell(c.x,c.y); it.x=s.x; it.y=s.y; }
+  else if(it.type==="label"){ it.x=Math.round(c.x); it.y=Math.round(c.y); }
+  else { const dx=Math.round(c.x), dy=Math.round(c.y); it.x1+=dx; it.y1+=dy; it.x2+=dx; it.y2+=dy; }
+  it.id = nextId++; items.push(it);
+  setSel([it.id]); commit();
+  if(it.type==="node"||it.type==="label") focusText();
+}
+const $ = id => document.getElementById(id);
+$("addNode").onclick  = ()=>add({type:"node",text:"새 칸",sub:"",size:CELL,fontSize:13,stroke:ORANGE,color:"#ffffff",fill:""});
+$("addRook").onclick  = ()=>add({type:"rook",size:CELL,fill:"#f2f2f2",stroke:"#222222"});
+$("addWall").onclick  = ()=>add({type:"wall",size:CELL,fill:"#6b7280",stroke:"#aab2bd"});
+$("addLabel").onclick = ()=>add({type:"label",text:"새 글자",fontSize:15,color:RED});
+$("addArrow").onclick = ()=>add({type:"arrow",x1:-40,y1:0,x2:40,y2:0,head:true,color:RED,width:1.5});
+$("addLine").onclick  = ()=>add({type:"arrow",x1:-40,y1:0,x2:40,y2:0,head:false,color:RED,width:1.5});
+$("undo").onclick = undo; $("redo").onclick = redo; $("dup").onclick = dupSel;
+$("addBarricade").onclick = ()=>add({type:"barricade",size:CELL,fill:"#e8212a",fill2:"#ffffff",stroke:"#cfd4da",rot:0});
+function setMode(m){
+  mode = m;
+  $("modeSel").classList.toggle("on", m==="select");
+  $("modePan").classList.toggle("on", m==="pan");
+}
+$("modeSel").onclick = ()=>setMode("select");
+$("modePan").onclick = ()=>setMode("pan");
+$("selAll").onclick = ()=>setSel(items.map(i=>i.id));
+$("selNone").onclick = ()=>setSel([]);
+$("zin").onclick  = ()=>{ const r=svg.getBoundingClientRect(); zoomAt(1.2, r.left+r.width/2, r.top+r.height/2); };
+$("zout").onclick = ()=>{ const r=svg.getBoundingClientRect(); zoomAt(1/1.2, r.left+r.width/2, r.top+r.height/2); };
+$("fit").onclick = fit;
+$("reset").onclick = ()=>{
+  if(!confirm("처음 상태로 되돌릴까요? (실행취소로 복구 가능)")) return;
+  items = defaultData(); sel = new Set(); fit(); showPanel(); commit();
+};
+
+/* ---------- 저장/내보내기 ---------- */
+function download(name, blob){
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+$("jsonSave").onclick = ()=> download("사냥터지도.json", new Blob([JSON.stringify(items,null,1)],{type:"application/json"}));
+$("jsonLoad").onchange = e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = ()=>{
+    try{
+      const d = JSON.parse(r.result); if(!Array.isArray(d)) throw 0;
+      items = d; nextId = Math.max(100, ...items.map(i=>i.id+1)); sel = new Set();
+      fit(); showPanel(); commit();
+    }catch(err){ alert("불러올 수 없는 파일입니다."); }
+  };
+  r.readAsText(f); e.target.value="";
+};
+$("png").onclick = ()=>{
+  const b = bbox(items), m = 40, scale = 2;
+  const W = b.w+m*2, H = b.h+m*2;
+  render(true);
+  const body = svg.innerHTML;
+  render();
+  const xml = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b.x-m} ${b.y-m} ${W} ${H}" width="${W*scale}" height="${H*scale}" font-family="Malgun Gothic, Apple SD Gothic Neo, sans-serif">${body}</svg>`;
+  const img = new Image();
+  img.onload = ()=>{
+    const c = document.createElement("canvas"); c.width = W*scale; c.height = H*scale;
+    c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+    c.toBlob(bl=>download("사냥터지도.png", bl));
+  };
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
+};
+
+/* ---------- 키보드 ---------- */
+document.addEventListener("keydown", e=>{
+  const t = document.activeElement;
+  const typing = /INPUT|TEXTAREA/.test(t.tagName) && t.type!=="checkbox";
+  const k = e.key.toLowerCase();
+  if(e.code==="Space" && !typing && !(t.tagName==="BUTTON")){ spaceDown = true; e.preventDefault(); return; }
+  if((e.ctrlKey||e.metaKey) && k==="z"){ if(typing) return; e.preventDefault(); e.shiftKey?redo():undo(); }
+  else if((e.ctrlKey||e.metaKey) && k==="y"){ if(typing) return; e.preventDefault(); redo(); }
+  else if((e.ctrlKey||e.metaKey) && k==="a"){ if(typing) return; e.preventDefault(); setSel(items.map(i=>i.id)); }
+  else if((e.key==="Delete"||e.key==="Backspace") && !typing){ e.preventDefault(); delSel(); }
+});
+
+$("bar").addEventListener("click", e=>{ if(e.target.tagName==="BUTTON") e.target.blur(); });
+document.addEventListener("keyup", e=>{ if(e.code==="Space") spaceDown = false; });
+window.addEventListener("blur", ()=>{ spaceDown = false; });
+
+load(); hist=[JSON.stringify(items)]; hi=0;
+fit(); showPanel();
+</script>
+</body>
+</html>
