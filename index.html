@@ -26,10 +26,7 @@
   #panel input[type=color]{width:100%;height:30px;background:none;border:1px solid #444;border-radius:5px;padding:0}
   #panel .danger{background:#5a2323;color:#fff;border:1px solid #844;border-radius:6px;padding:7px;cursor:pointer;width:100%;font-family:inherit}
   #panel .hint{color:#999;line-height:1.6;font-size:12px}
-  #keyHint{background:#171a20;border-bottom:1px solid #333;padding:4px 12px;font-size:12px;color:#aab;line-height:1.9}
-  #keyHint span{white-space:nowrap;display:inline-block}
-  #keyHint b{color:#ffb35c;font-weight:normal;background:#2b313b;border:1px solid #444;border-radius:4px;padding:0 5px;margin-right:3px}
-  #keyHint span{margin-right:12px}
+  #bar button .kb{display:inline-block;margin-left:6px;font-size:10px;line-height:1;color:#ffb35c;background:#1a1e25;border:1px solid #4a4a4a;border-radius:4px;padding:2px 4px;vertical-align:1px}
   #keysTbl td.k{white-space:nowrap}
   #keysTbl .clr{background:none;border:0;color:#888;cursor:pointer;font-size:13px;margin-left:4px}
   #keysTbl .clr:hover{color:#ff8a8a}
@@ -51,8 +48,8 @@
 </head>
 <body>
 <div id="bar">
-  <button id="addNode">＋ 칸</button>
   <button id="addCastle">＋ 성</button>
+  <button id="addNode">＋ 칸</button>
   <button id="addWall">＋ 벽</button>
   <button id="addBarricade">＋ 바리케이트</button>
   <button id="addLabel">＋ 글자</button>
@@ -83,7 +80,6 @@
   <span class="sep"></span>
   <button id="keysBtn">⌨ 단축키</button>
 </div>
-<div id="keyHint"></div>
 <div id="keysDlg">
   <div class="box">
     <h3>단축키 <small>키 칸을 누른 뒤 원하는 키를 누르면 바뀝니다 (Esc: 취소)</small></h3>
@@ -239,14 +235,15 @@ function render(forExport=false){
       </g></g>`;
   }
   for(const it of items.filter(i=>i.type==="barricade")){
-    const s = it.size*0.34, x = it.x, y = it.y;
+    // 위에서 내려다본 모양: 줄무늬 막대(중앙) + 양 끝 받침 선. 길이는 마름모 변 길이(size/√2) 안에 들어가게
+    const x = it.x, y = it.y, L = it.size*0.62, H = it.size*0.16, n = 6, w = L/n;
     let seg = "";
-    for(let k=0;k<6;k++){
-      seg += `<rect x="${r1(-1.2*s+k*0.4*s)}" y="${r1(-0.5*s)}" width="${r1(0.4*s)}" height="${r1(0.5*s)}" fill="${k%2?it.fill2:it.fill}" stroke="${it.stroke}" stroke-width="1"/>`;
+    for(let k=0;k<n;k++){
+      seg += `<rect x="${r1(-L/2+k*w)}" y="${r1(-H/2)}" width="${r1(w)}" height="${r1(H)}" fill="${k%2?it.fill2:it.fill}" stroke="${it.stroke}" stroke-width="1"/>`;
     }
-    const legs = `<path d="M${r1(-0.85*s)},${0} L${r1(-1.05*s)},${r1(0.7*s)} M${r1(0.85*s)},${0} L${r1(1.05*s)},${r1(0.7*s)}" stroke="${it.stroke}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
+    const feet = `<path d="M${r1(-L/2+w*0.6)},${r1(-H*0.95)} v${r1(H*1.9)} M${r1(L/2-w*0.6)},${r1(-H*0.95)} v${r1(H*1.9)}" stroke="${it.stroke}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
     h += `<g data-id="${it.id}" style="cursor:move"><polygon points="${diamond(x,y,it.size/2)}" fill="#000" fill-opacity="0.01"/>
-      <g transform="translate(${x} ${y}) rotate(${it.rot??-45})" pointer-events="none">${legs}${seg}</g></g>`;
+      <g transform="translate(${x} ${y}) rotate(${it.rot??-45})" pointer-events="none">${feet}${seg}</g></g>`;
   }
   for(const it of items.filter(i=>i.type==="arrow")){
     const line =`M${it.x1},${it.y1} L${it.x2},${it.y2}`;
@@ -694,13 +691,13 @@ $("png").onclick = ()=>{
 /* ---------- 단축키 ---------- */
 // 각 동작: 이름, 기본 키(조합은 "Ctrl+Shift+키" 형식, 키는 e.key 기준), 실행 함수
 const ACTIONS = [
+  ["addCastle","성 추가","",()=>addNew("castle",true)],
   ["addNode","칸 추가","1",()=>addNew("node",true)],
   ["addWall","벽 추가","2",()=>addNew("wall",true)],
   ["addBarricade","바리케이트 추가","3",()=>addNew("barricade",true)],
   ["addLabel","글자 추가","4",()=>addNew("label",true)],
   ["addArrow","화살표 추가","5",()=>addNew("arrow",true)],
   ["addLine","선 추가","6",()=>addNew("line",true)],
-  ["addCastle","성 추가","",()=>addNew("castle",true)],
   ["undo","실행취소","Ctrl+Z",undo],
   ["redo","다시실행","Ctrl+Shift+Z",redo],
   ["dup","복제","Ctrl+D",dupSel],
@@ -773,12 +770,16 @@ document.addEventListener("keydown", e=>{
     if(k && (k===combo || (alt && k===alt))){ e.preventDefault(); a[3](e); return; }
   }
 });
-function renderHint(){                    // 툴바 아래 단축키 안내
-  const show = ["addNode","addWall","addBarricade","addLabel","addArrow","addLine","addCastle","edit","undo","redo","dup","del","selAll","modeSel","modePan","rot45","fit","align","keys"];
-  $("keyHint").innerHTML = show.map(id=>{
-    const a = ACTIONS.find(x=>x[0]===id), k = keymap[id]; if(!k) return "";
-    return `<span><b>${prettyKey(k)}</b>${a[1].replace(/ \(.*\)$/,"")}</span>`;
-  }).join("") + `<span style="color:#777">방향키: 선택한 것 이동 · Space/오른쪽버튼 드래그: 화면 이동</span>`;
+// 툴바 버튼 안에 단축키 표시 (동작 id → 버튼 id)
+const BTN_OF = {addCastle:"addCastle",addNode:"addNode",addWall:"addWall",addBarricade:"addBarricade",addLabel:"addLabel",addArrow:"addArrow",addLine:"addLine",
+  undo:"undo",redo:"redo",dup:"dup",modeSel:"modeSel",modePan:"modePan",selAll:"selAll",selNone:"selNone",fit:"fit",align:"alignCells",keys:"keysBtn"};
+function renderHint(){
+  for(const [act,btn] of Object.entries(BTN_OF)){
+    const el = $(btn); if(!el) continue;
+    el.querySelector(".kb")?.remove();
+    const k = keymap[act]; if(!k) continue;
+    const s = document.createElement("span"); s.className="kb"; s.textContent = prettyKey(k); el.appendChild(s);
+  }
 }
 
 function toggleKeys(open){
