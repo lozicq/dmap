@@ -26,6 +26,13 @@
   #panel input[type=color]{width:100%;height:30px;background:none;border:1px solid #444;border-radius:5px;padding:0}
   #panel .danger{background:#5a2323;color:#fff;border:1px solid #844;border-radius:6px;padding:7px;cursor:pointer;width:100%;font-family:inherit}
   #panel .hint{color:#999;line-height:1.6;font-size:12px}
+  #keyHint{background:#171a20;border-bottom:1px solid #333;padding:4px 12px;font-size:12px;color:#aab;line-height:1.9}
+  #keyHint span{white-space:nowrap;display:inline-block}
+  #keyHint b{color:#ffb35c;font-weight:normal;background:#2b313b;border:1px solid #444;border-radius:4px;padding:0 5px;margin-right:3px}
+  #keyHint span{margin-right:12px}
+  #keysTbl td.k{white-space:nowrap}
+  #keysTbl .clr{background:none;border:0;color:#888;cursor:pointer;font-size:13px;margin-left:4px}
+  #keysTbl .clr:hover{color:#ff8a8a}
   #keysDlg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10;align-items:center;justify-content:center}
   #keysDlg.open{display:flex}
   #keysDlg .box{background:#1d2128;border:1px solid #444;border-radius:10px;padding:16px 18px;width:min(560px,94vw);max-height:90vh;overflow:auto;font-size:13px}
@@ -76,6 +83,7 @@
   <span class="sep"></span>
   <button id="keysBtn">⌨ 단축키</button>
 </div>
+<div id="keyHint"></div>
 <div id="keysDlg">
   <div class="box">
     <h3>단축키 <small>키 칸을 누른 뒤 원하는 키를 누르면 바뀝니다 (Esc: 취소)</small></h3>
@@ -122,6 +130,7 @@ let mode = "select";         // select | pan
 let drag = null;
 let spaceDown = false;
 let bg = "#242a33";          // 지도 전체 배경색
+let mouse = null;            // 지도 위 마우스 위치(월드 좌표), 밖이면 null
 const KEY = "huntMapEditor2";
 
 function load(){
@@ -376,7 +385,7 @@ function showPanel(){
     document.getElementById("rot45").onclick = ()=>rotateSel(45);
     document.getElementById("rot90").onclick = ()=>rotateSel(90);
     document.getElementById("straight").onclick = ()=>{
-      const p = snapAngle(it.x1,it.y1,it.x2,it.y2); it.x2=p.x; it.y2=p.y; render(); commit();
+      const p = snapAngle(it.x1,it.y1,it.x2,it.y2); it.x2=Math.round(p.x); it.y2=Math.round(p.y); render(); commit();
     };
   }
   if(it.type==="barricade"){
@@ -462,9 +471,34 @@ function snapCell(x,y){
   }
   return {x: GX + ri*STEP, y: GY + rj*STEP};
 }
+function snapPoint(x,y){                  // 칸 중심·꼭짓점 격자(STEP 간격)
+  return {x: GX + Math.round((x-GX)/STEP)*STEP, y: GY + Math.round((y-GY)/STEP)*STEP};
+}
+function snapArrowEnd(ox,oy,x,y){         // 화살표 끝점: 각도 고정 + 격자 맞춤
+  const ang = $("angSnap").checked, grid = snapOn();
+  if(ang && grid){
+    const dx=x-ox, dy=y-oy, len=Math.hypot(dx,dy);
+    const a = Math.round(Math.atan2(dy,dx)/(Math.PI/4));   // 0..±4 (45° 단위)
+    if(a%2===0){                                           // 가로/세로: 길이를 STEP 단위로
+      const k = Math.max(1, Math.round(len/STEP));
+      return {x: ox + (a===0?k*STEP : a===4||a===-4 ? -k*STEP : 0), y: oy + (a===2?k*STEP : a===-2 ? -k*STEP : 0)};
+    }
+    const k = Math.max(1, Math.round(len/(STEP*Math.SQRT2)));   // 대각선: |dx|=|dy|=k*STEP
+    return {x: ox + Math.sign(Math.cos(a*Math.PI/4))*k*STEP, y: oy + Math.sign(Math.sin(a*Math.PI/4))*k*STEP};
+  }
+  if(ang){ const q = snapAngle(ox,oy,x,y); return {x:Math.round(q.x), y:Math.round(q.y)}; }
+  if(grid) return snapPoint(x,y);
+  return {x:Math.round(x), y:Math.round(y)};
+}
 function alignCells(){
-  const targets = (sel.size ? selItems() : items).filter(i=>CELLTYPES.includes(i.type));
-  for(const it of targets){ const s = snapCell(it.x,it.y); it.x=s.x; it.y=s.y; }
+  const targets = sel.size ? selItems() : items;
+  for(const it of targets){
+    if(CELLTYPES.includes(it.type)){ const s = snapCell(it.x,it.y); it.x=s.x; it.y=s.y; }
+    else if(it.type==="arrow"){
+      const a = snapPoint(it.x1,it.y1); it.x1=a.x; it.y1=a.y;
+      const b = snapArrowEnd(it.x1,it.y1,it.x2,it.y2); it.x2=b.x; it.y2=b.y;
+    }
+  }
   render(); commit();
 }
 svg.addEventListener("pointerdown", e=>{
@@ -504,7 +538,9 @@ svg.addEventListener("pointerdown", e=>{
   svg.setPointerCapture(e.pointerId);
   render(); showPanel();
 });
+svg.addEventListener("pointerleave", ()=>{ mouse = null; });
 svg.addEventListener("pointermove", e=>{
+  mouse = pt(e);
   if(!drag) return;
   if(drag.mode==="pan"){
     const dx=e.clientX-drag.px, dy=e.clientY-drag.py;
@@ -526,10 +562,7 @@ svg.addEventListener("pointermove", e=>{
   if(drag.mode==="handle"){
     const it = byId(drag.id); if(!it) return;
     const w = drag.which, ox = w==="1"?it.x2:it.x1, oy = w==="1"?it.y2:it.y1;
-    let q = {x:Math.round(p.x), y:Math.round(p.y)};
-    if(document.getElementById("angSnap").checked){
-      q = snapAngle(ox,oy,p.x,p.y); q = {x:Math.round(q.x), y:Math.round(q.y)};
-    }
+    const q = snapArrowEnd(ox,oy,p.x,p.y);
     it["x"+w]=q.x; it["y"+w]=q.y; render(); return;
   }
   if(drag.mode==="move"){
@@ -538,6 +571,8 @@ svg.addEventListener("pointermove", e=>{
     const pr = drag.origs[drag.primary];
     if(snapOn() && CELLTYPES.includes(pr.type)){
       const s = snapCell(pr.x+dx, pr.y+dy); dx = s.x-pr.x; dy = s.y-pr.y;
+    } else if(snapOn() && pr.type==="arrow"){
+      const s = snapPoint(pr.x1+dx, pr.y1+dy); dx = s.x-pr.x1; dy = s.y-pr.y1;
     } else { dx=Math.round(dx); dy=Math.round(dy); }
     for(const it of selItems()){
       const o = drag.origs[it.id]; if(!o) continue;
@@ -569,27 +604,42 @@ function viewCenter(){
   const w = svg.clientWidth||800, h = svg.clientHeight||600;
   return {x:view.x+w/view.z/2, y:view.y+h/view.z/2};
 }
-function add(it){
-  const c = viewCenter();
-  if(CELLTYPES.includes(it.type)){ const s = snapCell(c.x,c.y); it.x=s.x; it.y=s.y; }
+function add(it, atMouse=false){
+  const c = (atMouse && mouse) ? mouse : viewCenter();   // 단축키면 마우스 위치, 버튼이면 화면 가운데
+  if(CELLTYPES.includes(it.type)){ const s = snapOn() ? snapCell(c.x,c.y) : {x:Math.round(c.x),y:Math.round(c.y)}; it.x=s.x; it.y=s.y; }
   else if(it.type==="label"){ it.x=Math.round(c.x); it.y=Math.round(c.y); }
-  else { const dx=Math.round(c.x), dy=Math.round(c.y); it.x1+=dx; it.y1+=dy; it.x2+=dx; it.y2+=dy; }
+  else {
+    const o = snapOn() ? snapPoint(c.x,c.y) : {x:Math.round(c.x),y:Math.round(c.y)};
+    it.x1+=o.x; it.y1+=o.y; it.x2+=o.x; it.y2+=o.y;
+  }
   it.id = nextId++; items.push(it);
   setSel([it.id]); commit();
-  if(it.type==="node"||it.type==="label") focusText();
+  // 버튼으로 추가하면 바로 이름 입력; 단축키로 추가하면 다음 단축키를 계속 쓸 수 있게 포커스를 옮기지 않음 (Enter로 이름 편집)
+  if(!atMouse && (it.type==="node"||it.type==="label")) focusText();
 }
 const $ = id => document.getElementById(id);
-$("addNode").onclick  = ()=>add({type:"node",text:"새 칸",sub:"",size:CELL,fontSize:13,stroke:ORANGE,color:"#ffffff",fill:""});
-$("addCastle").onclick = ()=>add({type:"castle",size:CELL,fill:"#d9d2c5",stroke:"#3b3028"});
-$("addWall").onclick  = ()=>add({type:"wall",size:CELL,fill:"#8a7a6a",stroke:"#3d3128"});
+// 새 요소 틀 (버튼 클릭: 화면 가운데 / 단축키: 마우스 위치)
+const NEW = {
+  node:      ()=>({type:"node",text:"새 칸",sub:"",size:CELL,fontSize:13,stroke:ORANGE,color:"#ffffff",fill:""}),
+  castle:    ()=>({type:"castle",size:CELL,fill:"#d9d2c5",stroke:"#3b3028"}),
+  wall:      ()=>({type:"wall",size:CELL,fill:"#8a7a6a",stroke:"#3d3128"}),
+  barricade: ()=>({type:"barricade",size:CELL,fill:"#e8212a",fill2:"#ffffff",stroke:"#cfd4da",rot:-45}),
+  label:     ()=>({type:"label",text:"새 글자",fontSize:15,color:RED}),
+  arrow:     ()=>({type:"arrow",x1:0,y1:0,x2:2*STEP,y2:-2*STEP,head:true,color:RED,width:1.5}),
+  line:      ()=>({type:"arrow",x1:0,y1:0,x2:2*STEP,y2:-2*STEP,head:false,color:RED,width:1.5}),
+};
+const addNew = (k, atMouse)=>add(NEW[k](), atMouse);
+$("addNode").onclick  = ()=>addNew("node");
+$("addCastle").onclick = ()=>addNew("castle");
+$("addWall").onclick  = ()=>addNew("wall");
 $("alignCells").onclick = alignCells;
 $("bgColor").oninput = e=>{ bg = e.target.value; render(); };
 $("bgColor").onchange = ()=>{ try{ localStorage.setItem(KEY+"bg", bg); }catch(e){} };
-$("addLabel").onclick = ()=>add({type:"label",text:"새 글자",fontSize:15,color:RED});
-$("addArrow").onclick = ()=>add({type:"arrow",x1:-40,y1:0,x2:40,y2:0,head:true,color:RED,width:1.5});
-$("addLine").onclick  = ()=>add({type:"arrow",x1:-40,y1:0,x2:40,y2:0,head:false,color:RED,width:1.5});
+$("addLabel").onclick = ()=>addNew("label");
+$("addArrow").onclick = ()=>addNew("arrow");
+$("addLine").onclick  = ()=>addNew("line");
 $("undo").onclick = undo; $("redo").onclick = redo; $("dup").onclick = dupSel;
-$("addBarricade").onclick = ()=>add({type:"barricade",size:CELL,fill:"#e8212a",fill2:"#ffffff",stroke:"#cfd4da",rot:-45});
+$("addBarricade").onclick = ()=>addNew("barricade");
 function setMode(m){
   mode = m;
   $("modeSel").classList.toggle("on", m==="select");
@@ -644,20 +694,20 @@ $("png").onclick = ()=>{
 /* ---------- 단축키 ---------- */
 // 각 동작: 이름, 기본 키(조합은 "Ctrl+Shift+키" 형식, 키는 e.key 기준), 실행 함수
 const ACTIONS = [
-  ["addNode","칸 추가","1",()=>$("addNode").click()],
-  ["addCastle","성 추가","2",()=>$("addCastle").click()],
-  ["addWall","벽 추가","3",()=>$("addWall").click()],
-  ["addBarricade","바리케이트 추가","4",()=>$("addBarricade").click()],
-  ["addLabel","글자 추가","5",()=>$("addLabel").click()],
-  ["addArrow","화살표 추가","6",()=>$("addArrow").click()],
-  ["addLine","선 추가","7",()=>$("addLine").click()],
+  ["addNode","칸 추가","1",()=>addNew("node",true)],
+  ["addWall","벽 추가","2",()=>addNew("wall",true)],
+  ["addBarricade","바리케이트 추가","3",()=>addNew("barricade",true)],
+  ["addLabel","글자 추가","4",()=>addNew("label",true)],
+  ["addArrow","화살표 추가","5",()=>addNew("arrow",true)],
+  ["addLine","선 추가","6",()=>addNew("line",true)],
+  ["addCastle","성 추가","",()=>addNew("castle",true)],
   ["undo","실행취소","Ctrl+Z",undo],
-  ["redo","다시실행","Ctrl+Y",redo],
+  ["redo","다시실행","Ctrl+Shift+Z",redo],
   ["dup","복제","Ctrl+D",dupSel],
   ["del","삭제","Delete",delSel],
   ["selAll","전체선택","Ctrl+A",()=>setSel(items.map(i=>i.id))],
   ["selNone","선택해제","Escape",()=>setSel([])],
-  ["modeSel","선택 모드","V",()=>setMode("select")],
+  ["modeSel","선택 모드","S",()=>setMode("select")],
   ["modePan","화면이동 모드","H",()=>setMode("pan")],
   ["fit","화면 맞춤","F",fit],
   ["align","칸 맞추기","G",alignCells],
@@ -667,9 +717,10 @@ const ACTIONS = [
   ["left","이동 ← (칸: 왼쪽 위 칸)","ArrowLeft",(e)=>nudgeSel(-1,0,e.shiftKey)],
   ["down","이동 ↓ (칸: 왼쪽 아래 칸)","ArrowDown",(e)=>nudgeSel(0,1,e.shiftKey)],
   ["right","이동 → (칸: 오른쪽 아래 칸)","ArrowRight",(e)=>nudgeSel(1,0,e.shiftKey)],
+  ["edit","이름 편집 (선택한 칸·글자)","Enter",()=>{ if(sel.size===1) focusText(); }],
   ["keys","단축키 창 열기/닫기","?",()=>toggleKeys()],
 ];
-const KEYS_STORE = KEY+"keys";
+const KEYS_STORE = KEY+"keys2";    // 기본 배치가 바뀌어 저장 키 이름 변경
 let keymap = {};
 function defaultKeys(){ const m={}; ACTIONS.forEach(a=>m[a[0]]=a[2]); return m; }
 function loadKeys(){
@@ -704,7 +755,7 @@ document.addEventListener("keydown", e=>{
     e.preventDefault();
     if(MOD_ONLY.has(e.key)) return;
     if(e.key==="Escape"){ waiting=null; renderKeys(); return; }
-    keymap[waiting] = comboOf(e); waiting=null; saveKeys(); renderKeys(); return;
+    keymap[waiting] = comboOf(e); waiting=null; saveKeys(); renderKeys(); renderHint(); return;
   }
   if($("keysDlg").classList.contains("open")){
     if(e.key==="Escape"){ toggleKeys(false); e.preventDefault(); }
@@ -712,16 +763,23 @@ document.addEventListener("keydown", e=>{
   }
   if(e.code==="Space" && !typing && t.tagName!=="BUTTON"){ spaceDown = true; e.preventDefault(); return; }
   if(typing){
-    if(e.key==="Escape"){ t.blur(); }
+    if(e.key==="Escape" || (e.key==="Enter" && t.tagName==="INPUT")){ t.blur(); }
     return;
   }
   const combo = comboOf(e);
   const alt = (e.key==="Backspace") ? "Delete" : null;     // Backspace도 삭제로
   for(const a of ACTIONS){
     const k = keymap[a[0]];
-    if(k===combo || (alt && k===alt)){ e.preventDefault(); a[3](e); return; }
+    if(k && (k===combo || (alt && k===alt))){ e.preventDefault(); a[3](e); return; }
   }
 });
+function renderHint(){                    // 툴바 아래 단축키 안내
+  const show = ["addNode","addWall","addBarricade","addLabel","addArrow","addLine","addCastle","edit","undo","redo","dup","del","selAll","modeSel","modePan","rot45","fit","align","keys"];
+  $("keyHint").innerHTML = show.map(id=>{
+    const a = ACTIONS.find(x=>x[0]===id), k = keymap[id]; if(!k) return "";
+    return `<span><b>${prettyKey(k)}</b>${a[1].replace(/ \(.*\)$/,"")}</span>`;
+  }).join("") + `<span style="color:#777">방향키: 선택한 것 이동 · Space/오른쪽버튼 드래그: 화면 이동</span>`;
+}
 
 function toggleKeys(open){
   const d = $("keysDlg");
@@ -730,20 +788,20 @@ function toggleKeys(open){
   if(o) renderKeys();
 }
 function renderKeys(){
-  const counts = {}; Object.values(keymap).forEach(v=>counts[v]=(counts[v]||0)+1);
+  const counts = {}; Object.values(keymap).forEach(v=>{ if(v) counts[v]=(counts[v]||0)+1; });
   $("keysTbl").innerHTML = ACTIONS.map(a=>{
     const k = keymap[a[0]], cls = (waiting===a[0]?"wait":"") + (counts[k]>1?" dupe":"");
-    return `<tr><td>${a[1]}</td><td class="k"><kbd data-a="${a[0]}" class="${cls}" title="${counts[k]>1?"다른 동작과 겹칩니다":""}">${waiting===a[0]?"키 입력…":prettyKey(k)}</kbd></td></tr>`;
+    const label = waiting===a[0] ? "키 입력…" : (k ? prettyKey(k) : "<span style='color:#777'>없음</span>");
+    return `<tr><td>${a[1]}</td><td class="k"><kbd data-a="${a[0]}" class="${cls}" title="${counts[k]>1?"다른 동작과 겹칩니다":"눌러서 바꾸기"}">${label}</kbd><button class="clr" data-c="${a[0]}" title="단축키 없애기">✕</button></td></tr>`;
   }).join("");
-  $("keysTbl").querySelectorAll("kbd").forEach(el=>{
-    el.onclick = ()=>{ waiting = el.dataset.a; renderKeys(); };
-  });
+  $("keysTbl").querySelectorAll("kbd").forEach(el=>{ el.onclick = ()=>{ waiting = el.dataset.a; renderKeys(); }; });
+  $("keysTbl").querySelectorAll(".clr").forEach(el=>{ el.onclick = ()=>{ keymap[el.dataset.c]=""; waiting=null; saveKeys(); renderKeys(); renderHint(); }; });
 }
 $("keysBtn").onclick = ()=>toggleKeys();
 $("keysClose").onclick = ()=>toggleKeys(false);
-$("keysDefault").onclick = ()=>{ keymap = defaultKeys(); saveKeys(); renderKeys(); };
+$("keysDefault").onclick = ()=>{ keymap = defaultKeys(); saveKeys(); renderKeys(); renderHint(); };
 $("keysDlg").addEventListener("click", e=>{ if(e.target.id==="keysDlg") toggleKeys(false); });
-loadKeys();
+loadKeys(); renderHint();
 
 $("bar").addEventListener("click", e=>{ if(e.target.tagName==="BUTTON") e.target.blur(); });
 document.addEventListener("keyup", e=>{ if(e.code==="Space") spaceDown = false; });
