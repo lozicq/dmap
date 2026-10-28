@@ -19,7 +19,15 @@
   svg{position:absolute;inset:0;width:100%;height:100%;background:#242a33;touch-action:none;user-select:none;-webkit-user-select:none}
   #panel{width:250px;background:#1d2128;border-left:1px solid #333;padding:12px;overflow:auto;font-size:13px}
   #panel h3{margin:0 0 10px;font-size:14px;color:#ffb35c}
-  #panel .row{margin-bottom:10px;display:flex;flex-direction:column;gap:4px}
+  #panel .row{margin-bottom:8px;display:flex;flex-direction:row;align-items:center;gap:8px}
+  #panel .row>label{flex:0 0 58px;color:#bbb;white-space:nowrap}
+  #panel .row>input{flex:1;min-width:0}
+  #panel .row.half{display:inline-flex;width:calc(50% - 4px)}
+  #panel .row.half+.row.half{margin-left:8px}
+  #panel .row.half>label{flex-basis:auto}
+  #panel .row.half>input[type=color]{width:38px;flex:0 0 38px}
+  #panel .row label.inl{flex:0 0 auto;color:#bbb}
+  #inlineEdit{position:absolute;display:none;z-index:5;background:#14171c;color:#fff;border:2px solid #7fd4ff;border-radius:5px;padding:4px 6px;font-family:inherit;font-weight:bold;text-align:center;outline:none;box-shadow:0 2px 10px rgba(0,0,0,.5)}
   #panel .btns{display:flex;gap:6px;margin-bottom:10px}
   #panel .btns button{flex:1;background:#2b313b;color:#eee;border:1px solid #444;border-radius:6px;padding:7px 4px;cursor:pointer;font-family:inherit;font-size:12px}
   #panel input[type=text],#panel input[type=number]{background:#14171c;color:#fff;border:1px solid #444;border-radius:5px;padding:6px;font-family:inherit;font-size:13px;width:100%}
@@ -88,7 +96,7 @@
   </div>
 </div>
 <div id="main">
-  <div id="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  <div id="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg><input id="inlineEdit" type="text" autocomplete="off"></div>
   <div id="panel"></div>
 </div>
 
@@ -127,6 +135,7 @@ let drag = null;
 let spaceDown = false;
 let bg = "#242a33";          // 지도 전체 배경색
 let mouse = null;            // 지도 위 마우스 위치(월드 좌표), 밖이면 null
+let lastDown = {id:null,t:0}; // 더블클릭 감지용
 const KEY = "huntMapEditor2";
 
 function load(){
@@ -235,15 +244,15 @@ function render(forExport=false){
       </g></g>`;
   }
   for(const it of items.filter(i=>i.type==="barricade")){
-    // 위에서 내려다본 모양: 줄무늬 막대(중앙) + 양 끝 받침 선. 길이는 마름모 변 길이(size/√2) 안에 들어가게
-    const x = it.x, y = it.y, L = it.size*0.62, H = it.size*0.16, n = 6, w = L/n;
-    let seg = "";
-    for(let k=0;k<n;k++){
-      seg += `<rect x="${r1(-L/2+k*w)}" y="${r1(-H/2)}" width="${r1(w)}" height="${r1(H)}" fill="${k%2?it.fill2:it.fill}" stroke="${it.stroke}" stroke-width="1"/>`;
-    }
-    const feet = `<path d="M${r1(-L/2+w*0.6)},${r1(-H*0.95)} v${r1(H*1.9)} M${r1(L/2-w*0.6)},${r1(-H*0.95)} v${r1(H*1.9)}" stroke="${it.stroke}" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
+    // 나무 바리케이트(위에서 본 모양): 판자 2장 + 나뭇결 + 끝기둥 + X 가새. 길이는 마름모 변 길이 안에 들어가게
+    const x = it.x, y = it.y, L = it.size*0.62, pw = it.size*0.075, gap = it.size*0.05;
+    const plank = (py)=>`<rect x="${r1(-L/2)}" y="${r1(py-pw/2)}" width="${r1(L)}" height="${r1(pw)}" rx="1" fill="${it.fill}" stroke="${it.stroke}" stroke-width="1"/>
+      <path d="M${r1(-L/2+4)},${r1(py-pw*0.2)} h${r1(L*0.35)} M${r1(-L*0.05)},${r1(py+pw*0.2)} h${r1(L*0.4)}" stroke="${it.stroke}" stroke-opacity=".45" stroke-width=".8" fill="none"/>`;
+    const y1 = -(gap/2+pw/2), y2 = gap/2+pw/2;
+    const post = (px)=>`<rect x="${r1(px-pw*0.45)}" y="${r1(y1-pw*0.7)}" width="${r1(pw*0.9)}" height="${r1(y2-y1+pw*1.4)}" rx="1" fill="${it.fill2}" stroke="${it.stroke}" stroke-width="1"/>`;
+    const brace = `<path d="M${r1(-L*0.22)},${r1(y1)} L${r1(L*0.22)},${r1(y2)} M${r1(-L*0.22)},${r1(y2)} L${r1(L*0.22)},${r1(y1)}" stroke="${it.fill2}" stroke-width="${r1(pw*0.55)}" stroke-linecap="round" fill="none"/>`;
     h += `<g data-id="${it.id}" style="cursor:move"><polygon points="${diamond(x,y,it.size/2)}" fill="#000" fill-opacity="0.01"/>
-      <g transform="translate(${x} ${y}) rotate(${it.rot??-45})" pointer-events="none">${feet}${seg}</g></g>`;
+      <g transform="translate(${x} ${y}) rotate(${it.rot??-45})" pointer-events="none">${plank(y1)}${plank(y2)}${brace}${post(-L/2+pw*0.6)}${post(L/2-pw*0.6)}</g></g>`;
   }
   for(const it of items.filter(i=>i.type==="arrow")){
     const line =`M${it.x1},${it.y1} L${it.x2},${it.y2}`;
@@ -287,7 +296,7 @@ function showPanel(){
       · 여러 개를 선택하면 함께 이동하고 색도 한꺼번에 바꿀 수 있어요<br>
       · 화면 이동: ✋ 모드로 바꾸거나, 오른쪽/가운데 버튼 드래그, Space+드래그<br>
       · 휠 = 확대/축소<br>
-      · 칸·글자는 더블클릭하면 글자 입력<br>
+      · 칸·글자는 더블클릭(또는 Enter)하면 그 자리에서 바로 이름 입력<br>
       · 화살표는 양 끝 파란 점을 드래그<br>
       · Delete 삭제, Ctrl+Z 실행취소<br>
       · 방향키로 선택한 것 이동 — 칸은 격자를 따라 대각선 이웃 칸으로 (Shift: 크게)<br>
@@ -336,26 +345,30 @@ function showPanel(){
   const f = (label,prop,type="text",extra="") =>
     `<div class="row"><label>${label}</label><input type="${type}" data-p="${prop}" value="${esc(it[prop]??"")}" ${extra}></div>`;
   let h = "";
+  const g = (label,prop,type="text",extra="") =>   // 반 폭(둘씩 나란히)
+    `<div class="row half"><label>${label}</label><input type="${type}" data-p="${prop}" value="${esc(it[prop]??"")}" ${extra}></div>`;
+  const SZ = 'min="30" max="300" step="5"';
   if(it.type==="node"){
-    h = `<h3>칸 수정</h3>` + f("번호.이름","text") + f("보조 문구 (예: (풀스킬))","sub")
-      + f("칸 크기","size","number",'min="30" max="300" step="5"')
-      + f("글자 크기","fontSize","number",'min="6" max="60"')
-      + `<div class="row"><label>배경색</label><input type="color" data-p="fill" value="${it.fill||"#333b47"}">
-         <label><input type="checkbox" id="noFill" ${it.fill?"":"checked"}> 배경 없음</label></div>`
-      + f("테두리 색","stroke","color") + f("글자 색","color","color");
+    h = `<h3>칸 수정</h3>` + f("내용","text") + f("보조","sub")
+      + g("크기","size","number",SZ) + g("글자","fontSize","number",'min="6" max="60"')
+      + `<div class="row"><label>배경</label><input type="color" data-p="fill" value="${it.fill||"#333b47"}" style="flex:0 0 38px">
+         <label class="inl"><input type="checkbox" id="noFill" ${it.fill?"":"checked"}> 없음</label></div>`
+      + g("테두리","stroke","color") + g("글자색","color","color");
   } else if(it.type==="castle"){
-    h = `<h3>성 수정</h3>` + f("칸 크기","size","number",'min="30" max="300" step="5"') + f("성 색","fill","color") + f("테두리·성문 색","stroke","color");
+    h = `<h3>성 수정</h3>`
+      + `<div class="row"><label>진영</label><div class="btns" style="margin:0;flex:1"><button data-cc="blue" style="background:#3f7fd6;border-color:#15345f">파랑</button><button data-cc="red" style="background:#d9413f;border-color:#5a1412">빨강</button><button data-cc="gray" style="background:#8a8378">회색</button></div></div>`
+      + f("크기","size","number",SZ) + g("성","fill","color") + g("테두리","stroke","color");
   } else if(it.type==="wall"){
-    h = `<h3>벽 수정</h3>` + f("칸 크기","size","number",'min="30" max="300" step="5"') + f("벽돌 색","fill","color") + f("줄눈·테두리 색","stroke","color");
+    h = `<h3>벽 수정</h3>` + f("크기","size","number",SZ) + g("벽돌","fill","color") + g("줄눈","stroke","color");
   } else if(it.type==="barricade"){
-    h = `<h3>바리케이트 수정</h3>` + f("칸 크기","size","number",'min="30" max="300" step="5"')
-      + f("줄무늬 색 1","fill","color") + f("줄무늬 색 2","fill2","color") + f("테두리 색","stroke","color")
+    h = `<h3>바리케이트 수정</h3>` + f("크기","size","number",SZ)
+      + g("판자","fill","color") + g("기둥","fill2","color") + f("테두리","stroke","color")
       + `<div class="btns"><button id="rotB45">↻ 45° 회전</button><button id="rotB90">↻ 90° 회전</button></div>`;
   } else if(it.type==="label"){
-    h = `<h3>글자 수정</h3>` + f("내용","text") + f("글자 크기","fontSize","number",'min="6" max="80"') + f("색","color","color");
+    h = `<h3>글자 수정</h3>` + f("내용","text") + g("글자","fontSize","number",'min="6" max="80"') + g("색","color","color");
   } else {
     h = `<h3>${it.head?"화살표":"선"} 수정</h3>`
-      + f("색","color","color") + f("굵기","width","number",'min="0.5" max="12" step="0.5"')
+      + g("색","color","color") + g("굵기","width","number",'min="0.5" max="12" step="0.5"')
       + `<div class="row"><label><input type="checkbox" data-p="head" ${it.head?"checked":""}> 화살촉 표시</label></div>
          <div class="btns"><button id="rot45">↻ 45° 회전</button><button id="rot90">↻ 90° 회전</button></div>
          <div class="btns"><button id="straight">반듯하게 맞춤</button></div>`;
@@ -385,6 +398,9 @@ function showPanel(){
       const p = snapAngle(it.x1,it.y1,it.x2,it.y2); it.x2=Math.round(p.x); it.y2=Math.round(p.y); render(); commit();
     };
   }
+  panel.querySelectorAll("[data-cc]").forEach(b=>{
+    b.onclick = ()=>{ Object.assign(it, CASTLE_COLORS[b.dataset.cc]); render(); commit(); showPanel(); };
+  });
   if(it.type==="barricade"){
     document.getElementById("rotB45").onclick = ()=>rotateSel(45);
     document.getElementById("rotB90").onclick = ()=>rotateSel(90);
@@ -513,6 +529,14 @@ svg.addEventListener("pointerdown", e=>{
   const g = e.target.closest("[data-id]");
   if(g){
     const id = +g.dataset.id;
+    // 더블클릭 직접 감지 (render()가 요소를 새로 만들어 브라우저 dblclick이 안 뜸)
+    const now = Date.now();
+    if(lastDown.id===id && now-lastDown.t<400 && !e.shiftKey){
+      lastDown = {id:null,t:0};
+      const it = byId(id);
+      if(it && (it.type==="node"||it.type==="label")){ e.preventDefault(); setSel([id]); inlineEdit(it); return; }
+    }
+    lastDown = {id, t:now};
     if(e.shiftKey){
       if(sel.has(id)){ sel.delete(id); render(); showPanel(); return; }
       sel.add(id);
@@ -590,11 +614,31 @@ function endDrag(){
 svg.addEventListener("contextmenu", e=>e.preventDefault());
 svg.addEventListener("pointerup", endDrag);
 svg.addEventListener("pointercancel", endDrag);
-svg.addEventListener("dblclick", e=>{
-  const g = e.target.closest("[data-id]"); if(!g) return;
-  const it = byId(+g.dataset.id);
-  if(it && (it.type==="node"||it.type==="label")){ setSel([it.id]); focusText(); }
+/* ---------- 칸 위에서 바로 이름 편집 ---------- */
+const ie = document.getElementById("inlineEdit");
+let ieTarget = null;
+function inlineEdit(it){
+  ieTarget = it;
+  const r = svg.getBoundingClientRect(), sr = document.getElementById("stage").getBoundingClientRect();
+  const sx = (it.x-view.x)*view.z + (r.left-sr.left), sy = (it.y-view.y)*view.z + (r.top-sr.top);
+  const w = Math.max(90, (it.type==="node" ? it.size*0.9 : it.text.length*it.fontSize*0.7+30)*view.z);
+  const fs = Math.max(12, it.fontSize*view.z);
+  ie.value = it.text;
+  ie.style.cssText = `display:block;left:${sx-w/2}px;top:${sy-fs}px;width:${w}px;font-size:${fs}px;color:${it.color}`;
+  setTimeout(()=>{ ie.focus(); ie.select(); }, 0);   // 마우스 기본 동작(포커스 이동) 뒤에 포커스
+}
+function inlineDone(save){
+  if(!ieTarget) return;
+  const it = ieTarget; ieTarget = null;
+  ie.style.display = "none";
+  if(save && ie.value !== it.text){ it.text = ie.value; render(); showPanel(); commit(); }
+}
+ie.addEventListener("keydown", e=>{
+  if(e.key==="Enter"){ e.preventDefault(); inlineDone(true); }
+  else if(e.key==="Escape"){ e.preventDefault(); inlineDone(false); }
+  e.stopPropagation();
 });
+ie.addEventListener("blur", ()=>inlineDone(true));
 
 /* ---------- 추가 버튼 ---------- */
 function viewCenter(){
@@ -615,12 +659,15 @@ function add(it, atMouse=false){
   if(!atMouse && (it.type==="node"||it.type==="label")) focusText();
 }
 const $ = id => document.getElementById(id);
+const CASTLE_COLORS = {                   // 성 진영 색
+  blue:{fill:"#3f7fd6",stroke:"#15345f"}, red:{fill:"#d9413f",stroke:"#5a1412"}, gray:{fill:"#d9d2c5",stroke:"#3b3028"}
+};
 // 새 요소 틀 (버튼 클릭: 화면 가운데 / 단축키: 마우스 위치)
 const NEW = {
   node:      ()=>({type:"node",text:"새 칸",sub:"",size:CELL,fontSize:13,stroke:ORANGE,color:"#ffffff",fill:""}),
-  castle:    ()=>({type:"castle",size:CELL,fill:"#d9d2c5",stroke:"#3b3028"}),
+  castle:    ()=>({type:"castle",size:CELL,...CASTLE_COLORS.blue}),
   wall:      ()=>({type:"wall",size:CELL,fill:"#8a7a6a",stroke:"#3d3128"}),
-  barricade: ()=>({type:"barricade",size:CELL,fill:"#e8212a",fill2:"#ffffff",stroke:"#cfd4da",rot:-45}),
+  barricade: ()=>({type:"barricade",size:CELL,fill:"#b07a45",fill2:"#5e3b1e",stroke:"#2e1d0e",rot:-45}),
   label:     ()=>({type:"label",text:"새 글자",fontSize:15,color:RED}),
   arrow:     ()=>({type:"arrow",x1:0,y1:0,x2:2*STEP,y2:-2*STEP,head:true,color:RED,width:1.5}),
   line:      ()=>({type:"arrow",x1:0,y1:0,x2:2*STEP,y2:-2*STEP,head:false,color:RED,width:1.5}),
@@ -714,7 +761,7 @@ const ACTIONS = [
   ["left","이동 ← (칸: 왼쪽 위 칸)","ArrowLeft",(e)=>nudgeSel(-1,0,e.shiftKey)],
   ["down","이동 ↓ (칸: 왼쪽 아래 칸)","ArrowDown",(e)=>nudgeSel(0,1,e.shiftKey)],
   ["right","이동 → (칸: 오른쪽 아래 칸)","ArrowRight",(e)=>nudgeSel(1,0,e.shiftKey)],
-  ["edit","이름 편집 (선택한 칸·글자)","Enter",()=>{ if(sel.size===1) focusText(); }],
+  ["edit","이름 편집 (선택한 칸·글자)","Enter",()=>{ const it = sel.size===1 && selItems()[0]; if(it && (it.type==="node"||it.type==="label")) inlineEdit(it); }],
   ["keys","단축키 창 열기/닫기","?",()=>toggleKeys()],
 ];
 const KEYS_STORE = KEY+"keys2";    // 기본 배치가 바뀌어 저장 키 이름 변경
