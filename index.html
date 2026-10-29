@@ -202,6 +202,10 @@ window.addEventListener("resize", ()=>{ updateView(); render(); });
 /* ---------- 그리기 ---------- */
 const CASTLE = [[-.7,-1],[-.4,-1],[-.4,-.8],[-.15,-.8],[-.15,-1],[.15,-1],[.15,-.8],[.4,-.8],[.4,-1],[.7,-1],[.7,-.55],[.45,-.35],[.45,.4],[.7,.65],[.7,.8],[.85,.8],[.85,1],[-.85,1],[-.85,.8],[-.7,.8],[-.7,.65],[-.45,.4],[-.45,-.35],[-.7,-.55]];
 function diamond(x,y,r){ return `${x},${y-r} ${x+r},${y} ${x},${y+r} ${x-r},${y}`; }
+function cellBox(it){                     // 성·바리케이트의 칸 테두리(칸과 같은 마름모) + 선택적 배경
+  const on = it.box !== false;
+  return `<polygon points="${diamond(it.x,it.y,it.size/2)}" fill="${it.bg||"#000"}" fill-opacity="${it.bg?1:0.01}" stroke="${on?(it.boxColor||ORANGE):"none"}" stroke-width="1"/>`;
+}
 function arrowHead(x1,y1,x2,y2,w){
   const a = Math.atan2(y2-y1, x2-x1), L = 10+w*1.5, sp = 0.45;
   return `M${x2-L*Math.cos(a-sp)},${y2-L*Math.sin(a-sp)} L${x2},${y2} L${x2-L*Math.cos(a+sp)},${y2-L*Math.sin(a+sp)}`;
@@ -237,7 +241,7 @@ function render(forExport=false){
     // 성: 체스 룩 실루엣 + 성문 아치 (좌표는 s 기준, 중심 0,0)
     const P = (ax,ay)=>`${r1(x+ax*s)},${r1(y+ay*s)}`;
     const poly = pts => pts.map(p=>P(p[0],p[1])).join(" ");
-    h += `<g data-id="${it.id}" style="cursor:move"><polygon points="${diamond(x,y,it.size/2)}" fill="#000" fill-opacity="0.01"/>
+    h += `<g data-id="${it.id}" style="cursor:move">${cellBox(it)}
       <g fill="${it.fill}" stroke="${it.stroke}" stroke-width="1.3" stroke-linejoin="round" pointer-events="none">
         <polygon points="${poly(CASTLE)}"/>
         <path d="M${P(-.22,1)} L${P(-.22,.5)} A${r1(.22*s)},${r1(.22*s)} 0 0 1 ${P(.22,.5)} L${P(.22,1)} Z" fill="${it.stroke}"/>
@@ -252,7 +256,7 @@ function render(forExport=false){
       const cx = -L/2 + step*(k+0.5), top = -Hh, bot = Hh;
       pickets += `<polygon points="${r1(cx-pw/2)},${r1(bot)} ${r1(cx-pw/2)},${r1(top+pw*0.6)} ${r1(cx)},${r1(top)} ${r1(cx+pw/2)},${r1(top+pw*0.6)} ${r1(cx+pw/2)},${r1(bot)}" fill="${it.fill}" stroke="${it.stroke}" stroke-width="1" stroke-linejoin="round"/>`;
     }
-    h += `<g data-id="${it.id}" style="cursor:move"><polygon points="${diamond(x,y,it.size/2)}" fill="#000" fill-opacity="0.01"/>
+    h += `<g data-id="${it.id}" style="cursor:move">${cellBox(it)}
       <g transform="translate(${x} ${y}) rotate(${it.rot??-45})" pointer-events="none">${rail(-Hh*0.45)}${rail(Hh*0.45)}${pickets}</g></g>`;
   }
   for(const it of items.filter(i=>i.type==="arrow")){
@@ -349,6 +353,11 @@ function showPanel(){
   const g = (label,prop,type="text",extra="") =>   // 반 폭(둘씩 나란히)
     `<div class="row half"><label>${label}</label><input type="${type}" data-p="${prop}" value="${esc(it[prop]??"")}" ${extra}></div>`;
   const SZ = 'min="30" max="300" step="5"';
+  const boxRows = ()=>                           // 성·바리케이트: 칸 테두리/배경
+    `<div class="row"><label>칸 테두리</label><label class="inl"><input type="checkbox" id="boxOn" ${it.box!==false?"checked":""}> 표시</label>
+       <input type="color" data-p="boxColor" value="${it.boxColor||ORANGE}" style="flex:0 0 38px;margin-left:auto"></div>
+     <div class="row"><label>칸 배경</label><input type="color" data-p="bg" value="${it.bg||"#333b47"}" style="flex:0 0 38px">
+       <label class="inl"><input type="checkbox" id="noBg" ${it.bg?"":"checked"}> 없음</label></div>`;
   if(it.type==="node"){
     h = `<h3>칸 수정</h3>` + f("내용","text") + f("보조","sub")
       + g("크기","size","number",SZ) + g("글자","fontSize","number",'min="6" max="60"')
@@ -358,12 +367,12 @@ function showPanel(){
   } else if(it.type==="castle"){
     h = `<h3>성 수정</h3>`
       + `<div class="row"><label>진영</label><div class="btns" style="margin:0;flex:1"><button data-cc="blue" style="background:#3f7fd6;border-color:#15345f">파랑</button><button data-cc="red" style="background:#d9413f;border-color:#5a1412">빨강</button><button data-cc="gray" style="background:#8a8378">회색</button></div></div>`
-      + f("크기","size","number",SZ) + g("성","fill","color") + g("테두리","stroke","color");
+      + f("크기","size","number",SZ) + g("성","fill","color") + g("테두리","stroke","color") + boxRows();
   } else if(it.type==="wall"){
     h = `<h3>벽 수정</h3>` + f("크기","size","number",SZ) + g("벽돌","fill","color") + g("줄눈","stroke","color");
   } else if(it.type==="barricade"){
     h = `<h3>바리케이트 수정</h3>` + f("크기","size","number",SZ)
-      + g("말뚝","fill","color") + g("가로대","fill2","color") + f("테두리","stroke","color")
+      + g("말뚝","fill","color") + g("가로대","fill2","color") + f("테두리","stroke","color") + boxRows()
       + `<div class="btns"><button id="rotB45">↻ 45° 회전</button><button id="rotB90">↻ 90° 회전</button></div>`;
   } else if(it.type==="label"){
     h = `<h3>글자 수정</h3>` + f("내용","text") + g("글자","fontSize","number",'min="6" max="80"') + g("색","color","color");
@@ -383,6 +392,7 @@ function showPanel(){
       else if(inp.type==="number") it[p] = parseFloat(inp.value)||0;
       else it[p] = inp.value;
       if(p==="fill"){ const nf=document.getElementById("noFill"); if(nf) nf.checked=false; }
+      if(p==="bg"){ const nb=document.getElementById("noBg"); if(nb) nb.checked=false; }
       render();
     });
     inp.addEventListener("change", ()=>{ commit(); if(p==="head") showPanel(); });
@@ -399,6 +409,10 @@ function showPanel(){
       const p = snapAngle(it.x1,it.y1,it.x2,it.y2); it.x2=Math.round(p.x); it.y2=Math.round(p.y); render(); commit();
     };
   }
+  const bo = document.getElementById("boxOn");
+  if(bo) bo.addEventListener("change", ()=>{ it.box = bo.checked; render(); commit(); });
+  const nb = document.getElementById("noBg");
+  if(nb) nb.addEventListener("change", ()=>{ it.bg = nb.checked ? "" : panel.querySelector('[data-p="bg"]').value; render(); commit(); });
   panel.querySelectorAll("[data-cc]").forEach(b=>{
     b.onclick = ()=>{ Object.assign(it, CASTLE_COLORS[b.dataset.cc]); render(); commit(); showPanel(); };
   });
